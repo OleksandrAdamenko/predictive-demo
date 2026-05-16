@@ -61,7 +61,9 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    .block-container { padding-top: 0.5rem !important; padding-bottom: 0.5rem !important; }
+    /* Hide default Streamlit top bar and reduce padding */
+    [data-testid="stHeader"] { display: none !important; }
+    .block-container { padding-top: 1rem !important; padding-bottom: 0.5rem !important; }
     [data-testid="metric-container"] { padding: 4px 0 !important; }
     [data-testid="stMetricValue"] { font-size: 1.1rem !important; }
     [data-testid="stMetricLabel"] { font-size: 0.72rem !important; color: #888 !important; }
@@ -77,8 +79,14 @@ st.markdown("""
 # ──────────────────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    st.image("https://dot.ca.gov/img/caltrans-logo.svg", width=140)
-    st.title("CalTRANS Backtest Replay")
+    st.markdown(
+        "<div style='font-size:1.35rem;font-weight:800;letter-spacing:.02em;"
+        "color:#fff;line-height:1.2;padding:4px 0 2px'>🚦 CalTRANS</div>"
+        "<div style='font-size:0.78rem;color:#aaa;margin-bottom:8px'>"
+        "California Dept. of Transportation</div>",
+        unsafe_allow_html=True,
+    )
+    st.title("Backtest Replay")
     st.caption("District 3 — Sacramento / Bay Area corridor")
     st.divider()
 
@@ -230,12 +238,10 @@ def _build_map_html(zone_rows: tuple, is_reality: bool) -> str:
             fc, fo = _TIER_COLOR[tier], 0.78
             sc, wt = _TIER_COLOR[tier], 1
         else:
-            if has_crash:
-                fc, fo = _TIER_COLOR[tier], 0.92
-                sc, wt = "#ffffff", 2
-            else:
-                fc, fo = "#aaaaaa", 0.20
-                sc, wt = "#999999", 0.5
+            if not has_crash:
+                continue  # hide no-crash zones in Reality check — they add noise
+            fc, fo = _TIER_COLOR[tier], 0.92
+            sc, wt = "#ffffff", 2
 
         folium.CircleMarker(
             location=[lat, lng],
@@ -259,10 +265,8 @@ def _build_map_html(zone_rows: tuple, is_reality: bool) -> str:
     if is_reality:
         legend_rows += (
             '<div style="border-top:1px solid #ccc;margin:6px 0 5px"></div>'
-            '<div style="display:flex;align-items:center;gap:7px">'
-            '<span style="display:inline-block;width:13px;height:13px;border-radius:50%;'
-            'flex-shrink:0;background:#aaa;opacity:.45"></span>'
-            '<span style="color:#111;font-size:13px">No crash</span></div>'
+            '<div style="color:#555;font-size:12px;font-style:italic">'
+            'Only zones with real crashes shown</div>'
         )
 
     # Inject as a proper Leaflet control (bottomleft) via a <script> block
@@ -412,20 +416,10 @@ with map_col:
                 f"<span style='font-size:0.85rem;color:#ddd'>{t.capitalize()}</span>"
                 f"</div>"
             )
-        if _is_reality:
-            legend_chips += (
-                "<div style='display:inline-flex;align-items:center;gap:5px;"
-                "margin:0 14px 6px 0'>"
-                "<span style='display:inline-block;width:13px;height:13px;"
-                "border-radius:50%;background:#aaa;opacity:.5;flex-shrink:0'></span>"
-                "<span style='font-size:0.85rem;color:#ddd'>No crash</span>"
-                "</div>"
-            )
-
         mode_desc = (
             "<span style='font-size:0.75rem;color:#aaa;display:block;margin-bottom:6px'>"
             + ("Zones colored by predicted risk tier." if not _is_reality
-               else "Crash zones keep tier color. No-crash zones are grey.")
+               else "Only zones where crashes occurred are shown, colored by predicted tier.")
             + "</span>"
         )
         st.markdown(
