@@ -247,18 +247,8 @@ st.divider()
 # ──────────────────────────────────────────────────────────────────────────────
 
 @st.cache_data(show_spinner=False)
-def _build_map_html(zone_rows: tuple) -> str:
-    """
-    Build a single map HTML containing BOTH prediction and reality-check layers.
-    Layers are toggled instantly via postMessage — no iframe reload on mode switch.
-    """
-    import json
-
+def _build_map_html(zone_rows: tuple, is_reality: bool) -> str:
     m = folium.Map(location=_MAP_CENTER, zoom_start=_MAP_ZOOM, tiles="CartoDB positron")
-
-    # Serialise marker data for both modes into JS arrays
-    pred_markers = []
-    real_markers = []
 
     for row in zone_rows:
         tier      = row["worst_tier"]
@@ -268,128 +258,79 @@ def _build_map_html(zone_rows: tuple) -> str:
         score     = row["max_score"]
         n_c, n_s  = int(row["n_crashes"]), int(row["n_slots"])
         prec_str  = f"{n_c}/{n_s} zone-hours had crashes" if n_s > 0 else "—"
-        radius    = _TIER_RADIUS[tier]
-        color     = _TIER_COLOR[tier]
 
-        popup = (
+        popup_html = (
             f"<b>{road}</b><br>"
             f"Zone {int(row['hotspot_id'])} · Tier: <b>{tier.upper()}</b><br>"
             f"Score: {score:.3f}<br>{prec_str}"
         )
+        tooltip = f"{road} — {'CRASH ✓' if (is_reality and has_crash) else tier.upper()}"
 
-        pred_markers.append({
-            "lat": lat, "lng": lng, "radius": radius,
-            "color": color, "fillColor": color, "fillOpacity": 0.78, "weight": 1,
-            "popup": popup, "tooltip": f"{road} — {tier.upper()}",
-        })
-
-        if has_crash:
-            real_markers.append({
-                "lat": lat, "lng": lng, "radius": radius,
-                "color": "#ffffff", "fillColor": color, "fillOpacity": 0.92, "weight": 2,
-                "popup": popup, "tooltip": f"{road} — CRASH ✓",
-            })
+        if not is_reality:
+            fc, fo = _TIER_COLOR[tier], 0.78
+            sc, wt = _TIER_COLOR[tier], 1
         else:
-            real_markers.append({
-                "lat": lat, "lng": lng, "radius": radius,
-                "color": "#999999", "fillColor": "#aaaaaa", "fillOpacity": 0.20, "weight": 0.5,
-                "popup": popup, "tooltip": f"{road} — {tier.upper()} (no crash)",
-            })
+            if has_crash:
+                fc, fo = _TIER_COLOR[tier], 0.92
+                sc, wt = "#ffffff", 2
+            else:
+                fc, fo = "#aaaaaa", 0.20
+                sc, wt = "#999999", 0.5
 
-    legend_pred = "".join(
+        folium.CircleMarker(
+            location=[lat, lng],
+            radius=_TIER_RADIUS[tier],
+            color=sc, weight=wt,
+            fill=True, fill_color=fc, fill_opacity=fo,
+            popup=folium.Popup(popup_html, max_width=260),
+            tooltip=tooltip,
+        ).add_to(m)
+
+    legend_rows = "".join(
         f'<div style="display:flex;align-items:center;gap:7px;margin-bottom:4px">'
         f'<span style="display:inline-block;width:13px;height:13px;border-radius:50%;'
         f'flex-shrink:0;background:{_TIER_COLOR[t]}"></span>'
         f'<span style="color:#111;font-size:13px">{t.capitalize()}</span></div>'
         for t in ["critical", "high", "medium"]
     )
-    legend_real = legend_pred + (
-        '<div style="border-top:1px solid #ccc;margin:6px 0 5px"></div>'
-        '<div style="display:flex;align-items:center;gap:7px">'
-        '<span style="display:inline-block;width:13px;height:13px;border-radius:50%;'
-        'flex-shrink:0;background:#aaa;opacity:.45"></span>'
-        '<span style="color:#111;font-size:13px">No crash</span></div>'
-    )
+    if is_reality:
+        legend_rows += (
+            '<div style="border-top:1px solid #ccc;margin:6px 0 5px"></div>'
+            '<div style="display:flex;align-items:center;gap:7px">'
+            '<span style="display:inline-block;width:13px;height:13px;border-radius:50%;'
+            'flex-shrink:0;background:#aaa;opacity:.45"></span>'
+            '<span style="color:#111;font-size:13px">No crash</span></div>'
+        )
 
-    dual_js = f"""
+    legend_js = f"""
     <script>
-    (function() {{
-        var predData = {json.dumps(pred_markers)};
-        var realData = {json.dumps(real_markers)};
-        var legendPred = {json.dumps(legend_pred)};
-        var legendReal = {json.dumps(legend_real)};
-        var predLayer = null, realLayer = null, legendCtrl = null;
-        var currentMode = 'prediction';
-
-        function waitForLeaflet() {{
-            if (typeof L === 'undefined') {{ setTimeout(waitForLeaflet, 80); return; }}
-            var mapDivs = document.querySelectorAll('.folium-map');
-            if (!mapDivs.length) {{ setTimeout(waitForLeaflet, 80); return; }}
-            var mapObj = window[mapDivs[0].id];
-            if (!mapObj) {{ setTimeout(waitForLeaflet, 80); return; }}
-
-            function makeLayer(data) {{
-                var lg = L.layerGroup();
-                data.forEach(function(d) {{
-                    L.circleMarker([d.lat, d.lng], {{
-                        radius: d.radius, color: d.color, weight: d.weight,
-                        fillColor: d.fillColor, fillOpacity: d.fillOpacity, fill: true
-                    }}).bindPopup(d.popup).bindTooltip(d.tooltip).addTo(lg);
-                }});
-                return lg;
-            }}
-
-            predLayer = makeLayer(predData);
-            realLayer = makeLayer(realData);
-            predLayer.addTo(mapObj);
-
-            // Legend control
-            legendCtrl = L.control({{position: 'bottomleft'}});
-            legendCtrl.onAdd = function() {{
-                var div = L.DomUtil.create('div');
-                div.style.cssText = 'background:rgba(255,255,255,0.96);padding:10px 14px;'
-                    + 'border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.25);'
-                    + 'font-family:sans-serif;pointer-events:none';
-                div.innerHTML = '<div style="font-weight:700;color:#111;font-size:13px;'
-                    + 'margin-bottom:7px">Risk tier</div>' + legendPred;
-                legendCtrl._div = div;
-                return div;
-            }};
-            legendCtrl.addTo(mapObj);
-
-            // Listen for mode toggle from Streamlit parent
-            window.addEventListener('message', function(e) {{
-                var mode = e.data && e.data.roadiq_mode;
-                if (!mode || mode === currentMode) return;
-                currentMode = mode;
-                if (mode === 'reality') {{
-                    mapObj.removeLayer(predLayer);
-                    realLayer.addTo(mapObj);
-                    if (legendCtrl._div) legendCtrl._div.innerHTML =
-                        '<div style="font-weight:700;color:#111;font-size:13px;margin-bottom:7px">Risk tier</div>'
-                        + legendReal;
-                }} else {{
-                    mapObj.removeLayer(realLayer);
-                    predLayer.addTo(mapObj);
-                    if (legendCtrl._div) legendCtrl._div.innerHTML =
-                        '<div style="font-weight:700;color:#111;font-size:13px;margin-bottom:7px">Risk tier</div>'
-                        + legendPred;
-                }}
-            }});
+    (function waitForLeaflet() {{
+        if (typeof L === 'undefined') {{ setTimeout(waitForLeaflet, 100); return; }}
+        var legend = L.control({{position: 'bottomleft'}});
+        legend.onAdd = function() {{
+            var div = L.DomUtil.create('div');
+            div.style.cssText = 'background:rgba(255,255,255,0.96);padding:10px 14px;'
+                + 'border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.25);'
+                + 'font-family:sans-serif;pointer-events:none';
+            div.innerHTML = '<div style="font-weight:700;color:#111;font-size:13px;'
+                + 'margin-bottom:7px">Risk tier</div>{legend_rows}';
+            return div;
+        }};
+        var mapDivs = document.querySelectorAll('.folium-map');
+        if (mapDivs.length) {{
+            var mapId = mapDivs[0].id;
+            if (window[mapId]) legend.addTo(window[mapId]);
         }}
-        waitForLeaflet();
     }})();
     </script>
     """
-    m.get_root().html.add_child(folium.Element(dual_js))
+    m.get_root().html.add_child(folium.Element(legend_js))
     return m._repr_html_()
 
 
 _zone_rows  = tuple(zone_summary.to_dict(orient="records"))
 _is_reality = (view_mode == "Reality check")
-# Map HTML is keyed only on zone_rows (date + hour filter) — NOT on view_mode.
-# Mode switching is handled in-browser via postMessage → no iframe reload.
-map_html    = _build_map_html(_zone_rows)
+map_html    = _build_map_html(_zone_rows, _is_reality)
 
 # Pre-compute stats shared across panels
 
@@ -410,7 +351,7 @@ top10_reliability["today_crash"] = top10_reliability["today_crash"].fillna(0)
 top10 = top10_reliability[["primary_road", "days_with_crash", "hit_pct", "today_crash"]].rename(
     columns={
         "primary_road":    "Road",
-        "days_with_crash": "Crash days (Jan)",
+        "days_with_crash": "Crash days",
         "hit_pct":         "% of month",
         "today_crash":     "Today?",
     }
@@ -459,13 +400,6 @@ with map_col:
     )
     st.markdown(mode_badge, unsafe_allow_html=True)
     components.html(map_html, height=620, scrolling=False)
-    # Send current mode into the iframe via postMessage so JS can switch layers
-    # without reloading the map. The iframe receives this on every rerun.
-    _mode_str = "reality" if _is_reality else "prediction"
-    components.html(
-        f"<script>window.parent.frames[0].postMessage({{roadiq_mode:'{_mode_str}'}}, '*');</script>",
-        height=0,
-    )
 
     # Sub-row: Day summary (left) + Legend (right), both in two columns
     sub_left, sub_right = st.columns([2, 1])
