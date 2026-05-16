@@ -13,6 +13,43 @@ Replays January 2026 day by day, showing predicted risk zones vs. actual crashes
 
 ---
 
+### Как устроена система и почему именно так?
+
+#### Откуда берутся данные
+
+Система обучена на реальных данных об авариях на дорогах Калифорнии за 2023–2025 годы — это официальная статистика CalTRANS (Калифорнийского департамента транспорта). Данные о погоде (осадки, ветер, видимость, температура) берутся из открытого источника Open-Meteo, который предоставляет исторические и прогнозные метеорологические данные бесплатно. Никаких закрытых или дорогостоящих источников данных не требуется.
+
+#### Почему карта разбита на шестиугольники?
+
+Территория Калифорнии разбита на тысячи маленьких шестиугольных клеток — каждая примерно 0.5 × 0.5 км. Такую сетку называют H3 (разработана компанией Uber для геопространственного анализа). Шестиугольники выбраны не случайно: у них все соседние клетки находятся на одинаковом расстоянии от центра, в отличие от квадратов, где угловые соседи дальше боковых. Это делает анализ пространственных паттернов более точным. Каждая клетка — это **зона**. Для каждой зоны и каждого часа суток система делает независимый прогноз.
+
+#### Как работает модель?
+
+Для предсказания используется алгоритм **Gradient Boosting** — один из наиболее надёжных и проверенных методов машинного обучения для задач классификации на табличных данных. Если объяснить совсем просто: алгоритм строит сотни простых правил вида «если час пик + мокрая дорога + эта зона исторически опасна → риск высокий», а потом объединяет их в одну общую оценку.
+
+Почему не нейросеть? Нейросети лучше работают с изображениями, видео и текстом — то есть там, где данные неструктурированы. Для табличных данных (а у нас именно таблица: дата, час, погода, история аварий) Gradient Boosting показывает сопоставимую или лучшую точность, при этом работает быстрее, требует меньше данных для обучения и его результаты проще интерпретировать. Это практичный выбор для реальной задачи.
+
+Модель смотрит на **13 факторов**: час дня, день недели, месяц, праздник или нет, историческая аварийность этой зоны, осадки, скорость ветра, видимость, тип погоды, температура, тип дороги (хайвей или нет). На выходе — оценка вероятности аварии от 0 до 1 для каждой зоны в каждый час.
+
+#### Как проходило обучение?
+
+Модель обучалась на данных 2023–2025 годов. Январь 2026 года был намеренно исключён из обучения и отложен как «контрольный» период — то есть модель ни разу не видела эти данные во время обучения. Именно на январе 2026 мы и проверяем качество предсказаний. Это стандартная практика в машинном обучении: честный экзамен на данных, которых модель не знает.
+
+Дополнительно обучены две версии модели: отдельно для будних дней и отдельно для выходных — потому что паттерны аварий в выходные существенно отличаются (другое распределение по часам, другие типичные причины).
+
+#### Уровни риска и почему зелёные зоны не показаны
+
+После того как модель выставила оценки всем зонам, они ранжируются, и каждой присваивается **уровень риска**:
+
+- **Critical (красный)** — топ 1% самых опасных зон
+- **High (оранжевый)** — топ 5%
+- **Medium (жёлтый)** — топ 20%
+- **Low (зелёный)** — остальные 80%
+
+На карте и в статистике мы сознательно **не показываем зелёные зоны**. Причина простая: их 80% от общего числа, они создают визуальный шум и не несут практической ценности для принятия решений. Зелёная зона — это «здесь всё как обычно». Красная, оранжевая или жёлтая — «сюда стоит обратить внимание». Именно на этом и строится логика системы: не предсказать каждую аварию, а выделить зоны повышенного риска там, где ресурсы патруля будут потрачены наиболее эффективно.
+
+---
+
 ### Что такое этот дашборд?
 
 Это демонстрационный дашборд, который показывает, как работает система предсказания ДТП на дорогах Калифорнии. Он воспроизводит январь 2026 года день за днём — мы берём уже прошедшие события и смотрим: насколько точно модель предсказала, где и когда случится авария, ещё **до** того, как она произошла.
@@ -21,32 +58,13 @@ Replays January 2026 day by day, showing predicted risk zones vs. actual crashes
 
 ---
 
-### Как устроена система в целом?
-
-Калифорния разбита на тысячи маленьких шестиугольных клеток (примерно 0.5 × 0.5 км каждая). Каждая такая клетка — это **зона**. Для каждой зоны и каждого часа суток система вычисляет: насколько вероятна авария здесь, в это время?
-
-Для этого она смотрит на 13 факторов: час дня, день недели, месяц, праздник или нет, историческая аварийность этой зоны, осадки, скорость ветра, видимость, тип погоды, температура, тип дороги (хайвей или нет).
-
-Получается оценка риска от 0 до 1 (например, 0.23 означает «23% вероятность аварии»). Затем все зоны ранжируются, и каждой присваивается **уровень риска (tier)**:
-
-- **Critical (красный)** — топ 1% самых опасных зон в этот час
-- **High (оранжевый)** — топ 5%
-- **Medium (жёлтый)** — топ 20%
-- **Low (зелёный)** — остальное (нижние 80%)
-
----
-
 ### Боковая панель (слева) — элементы управления
 
-**Логотип CalTRANS** — напоминает, для кого сделана система: Калифорнийский департамент транспорта.
-
-**Выбор даты** — выбираете любой день из января 2026 года. Система показывает, что предсказывалось и что происходило в реальности именно в этот день. Рядом с датой указан день недели (например, Saturday — суббота).
+**Выбор даты** — выбираете любой день из января 2026 года. Система показывает, что предсказывалось и что происходило в реальности именно в этот день. Рядом с датой указан день недели (например, Sunday — воскресенье).
 
 **Map view** — переключатель между двумя режимами карты:
 - **Prediction** — карта показывает то, что система предсказала утром того дня. Зоны окрашены по уровню риска. Это ответ на вопрос: «Куда смотрела система?»
-- **Reality check** — карта показывает, что случилось на самом деле. Зоны, где авария действительно произошла, сохраняют свой цвет. Зоны, где аварии не было, становятся серыми. Это ответ на вопрос: «Угадала ли система?»
-
-**Show 'low' tier zones** — галочка, которая включает/выключает отображение зелёных зон (низкий риск). По умолчанию они скрыты, потому что их очень много и они «замусоривают» карту. Обычно интереснее смотреть только на зоны с высоким риском.
+- **Reality check** — карта показывает, что случилось на самом деле. Зоны, где авария действительно произошла, сохраняют свой цвет. Зоны, где аварии не было, становятся серыми и прозрачными. Это ответ на вопрос: «Угадала ли система?»
 
 **Filter by hour of day** — ползунок, которым можно ограничить данные определённым временным диапазоном. Например, выставить 16:00–19:00 и смотреть только на вечерний час пик. Все числа на странице пересчитываются под этот фильтр.
 
@@ -74,15 +92,15 @@ Replays January 2026 day by day, showing predicted risk zones vs. actual crashes
 
 ### Карта
 
-Главный элемент дашборда. На карте показаны дороги и шестиугольные зоны в виде кружков.
+Главный элемент дашборда. На карте показаны дороги и зоны повышенного риска в виде кружков (критические, высокие и средние — топ 20% всех зон).
 
-**Цвет кружка** — уровень риска зоны (красный = критический, оранжевый = высокий, жёлтый = средний, зелёный = низкий).
+**Цвет кружка** — уровень риска зоны (красный = критический, оранжевый = высокий, жёлтый = средний).
 
-**Размер кружка** — тоже зависит от уровня риска: красные кружки крупнее, зелёные — мельче. Это позволяет сразу визуально выделить самые опасные места.
+**Размер кружка** — тоже зависит от уровня риска: красные кружки крупнее, жёлтые — мельче. Это позволяет сразу визуально выделить самые опасные места.
 
 **В режиме Reality check:**
 - Зоны с реальными авариями сохраняют яркий цвет и белую обводку
-- Зоны без аварий становятся серыми и прозрачными
+- Зоны, где авария не случилась, становятся серыми и прозрачными — они остаются на карте, чтобы было видно: «система смотрела сюда, но здесь обошлось»
 
 **При наведении на кружок** появляется подсказка с названием дороги и уровнем риска.
 
@@ -93,8 +111,6 @@ Replays January 2026 day by day, showing predicted risk zones vs. actual crashes
 - Числовая оценка риска (например, 0.312)
 - Сколько временных слотов в этой зоне имели аварии (например, «2/8 zone-hours had crashes» означает: из 8 проверяемых часов в этой зоне в 2 из них случилась авария)
 
-**Легенда на карте** (левый нижний угол карты) — объяснение цветов. В режиме Reality check добавляется серый кружок «No crash».
-
 ---
 
 ### Day summary (под картой, слева) — итоги дня
@@ -103,7 +119,7 @@ Replays January 2026 day by day, showing predicted risk zones vs. actual crashes
 
 **Crashes recorded** — сколько всего зафиксировано аварий за выбранный период. Под числом написано, сколько всего «зона-час» слотов было проанализировано. Например: «47 аварий из 12,400 слотов» означает, что система смотрела на 12,400 пар «зона × час» и в 47 из них произошла авария.
 
-**Critical zones** — сколько временных слотов было помечено как критический риск, и какой процент из них действительно содержал аварию (hit%), и насколько это лучше случайного угадывания (например, «2.5×» означает: в критических зонах аварии происходили в 2.5 раза чаще, чем в среднем по всем зонам).
+**Critical zones** — сколько временных слотов было помечено как критический риск, какой процент из них действительно содержал аварию (hit%), и насколько это лучше случайного угадывания (например, «2.8×» означает: в критических зонах аварии происходили в 2.8 раза чаще, чем в среднем по всем зонам).
 
 **High zones** — то же самое для зон высокого риска.
 
@@ -113,11 +129,11 @@ Replays January 2026 day by day, showing predicted risk zones vs. actual crashes
 
 ### Legend (под картой, справа) — легенда
 
-Объяснение цветов зон. Дублирует легенду на карте, но находится рядом с элементами управления, чтобы было удобнее.
+Объяснение цветов зон.
 
-В режиме **Prediction**: «Zones colored by predicted risk tier» (зоны окрашены по предсказанному уровню риска).
+В режиме **Prediction**: «Zones colored by predicted risk tier (top 20%)» — на карте показаны только зоны повышенного риска.
 
-В режиме **Reality check**: «Crash zones keep tier color. No-crash zones are grey» (зоны с авариями сохраняют цвет. Зоны без аварий — серые).
+В режиме **Reality check**: «Crash zones keep tier color. No-crash zones are grey» — зоны с авариями сохраняют цвет, зоны без аварий — серые.
 
 ---
 
@@ -153,19 +169,17 @@ Replays January 2026 day by day, showing predicted risk zones vs. actual crashes
 
 Отвечает на вопрос: «Когда система говорит „опасно" — насколько она права?»
 
-Столбцы:
-
-**Tier** — уровень риска.
+**Tier** — уровень риска (показаны только критический, высокий и средний).
 
 **Predicted zones** — сколько зона-часов было помечено этим уровнем риска.
 
 **Actual crashes** — сколько из них реально содержали аварию.
 
-**Precision (hit rate)** — процент попаданий. Например, «11.2%» для critical означает: из всех зона-часов с пометкой «критический» в каждом 9-м действительно случилась авария.
+**Precision (hit rate)** — процент попаданий. Например, «12.7%» для critical означает: из всех зона-часов с пометкой «критический» в каждом восьмом действительно случилась авария.
 
-**Lift vs. baseline** — во сколько раз точность этого уровня лучше, чем случайное угадывание. Baseline — это средняя аварийность по всем зонам (обычно ~0.3–0.4%). Если lift для critical равен 2.5×, значит: в красных зонах аварии происходят в 2.5 раза чаще, чем в среднем по всем зонам. Это ключевая метрика ценности модели.
+**Lift vs. baseline** — во сколько раз точность этого уровня лучше, чем случайное угадывание. Если lift для critical равен 2.8×, значит: в красных зонах аварии происходят в 2.8 раза чаще, чем в среднем по всем зонам. Это ключевая метрика ценности системы.
 
-**Как читать этот результат простыми словами:** Если мы скажем дорожному патрулю «езжайте только в красные зоны», они будут находить аварии в 2.5 раза чаще, чем если бы они ездили по случайным маршрутам. Это экономит время и ресурсы.
+**Как читать этот результат простыми словами:** Если мы скажем дорожному патрулю «езжайте только в красные зоны», они будут находить аварии в 2.8 раза чаще, чем если бы они ездили по случайным маршрутам. Это экономит время и ресурсы.
 
 ---
 
@@ -173,17 +187,13 @@ Replays January 2026 day by day, showing predicted risk zones vs. actual crashes
 
 Отвечает на вопрос: «Какой процент реальных аварий система успела «поймать» в своих предсказаниях?»
 
-Столбцы:
-
-**Tier** — уровень риска.
+**Tier** — уровень риска (показаны только критический, высокий и средний).
 
 **Crashes in tier** — сколько реальных аварий произошло в зонах этого уровня.
 
 **% of day's crashes** — какая доля от всех аварий за день приходится на этот уровень.
 
-**Cumulative (top→down)** — нарастающий итог сверху вниз. Например, если critical = 15% и high = 30%, то cumulative для high = 45%. Это значит: если смотреть только на красные и оранжевые зоны, можно «накрыть» 45% всех аварий за день.
-
-**Как читать этот результат простыми словами:** Если дорожный патруль будет проверять только критические и высокие зоны (топ 5% всех зон), они смогут оказаться рядом с ~40–50% всех реальных аварий. Остальные 50–60% произошли в зонах, которые система оценила как «средний» или «низкий» риск — их тоже можно мониторить, но с меньшим приоритетом.
+**Cumulative (top→down)** — нарастающий итог сверху вниз. Если critical = 3%, high = 8%, medium = 25%, то cumulative для medium = 36%. Это значит: наблюдая за топ 20% зон, можно «накрыть» 36% всех аварий дня.
 
 ---
 
@@ -199,40 +209,34 @@ Backtest (ретроспективное тестирование) — это п
 
 Мы прогнали все 31 день января 2026 через модель и собрали итоговые цифры. Вот что получилось простыми словами.
 
-**Общий масштаб:** Система проанализировала 74 400 пар «зона × час» за месяц. Реальных аварий случилось 3 353. Это означает, что в среднем авария происходит примерно в каждом 22-м слоте — то есть это редкое событие даже на опасных дорогах.
+**Общий масштаб:** Система проанализировала 74 400 пар «зона × час» за месяц. Реальных аварий случилось 3 353. В среднем авария происходит примерно в каждом 22-м слоте — это редкое событие даже на опасных дорогах.
 
-**Насколько точны красные зоны (Critical)?**
-В среднем за месяц: из каждых 100 зона-часов, помеченных как «критический», **12–13 действительно содержали аварию**. Это в **2.8 раза лучше**, чем случайное угадывание. В лучшие дни этот показатель достигал 5× и выше — модель работала очень чётко. В худшие дни (обычно воскресенья или дни с малым числом аварий) — около 1.5×.
+**Насколько точны предсказания?**
 
-**Если простыми словами:** представьте, что вы наугад отправляете патрульную машину в одну из 100 зон — она найдёт аварию с вероятностью ~4.5%. Если вы отправляете её в «красную» зону по совету системы — вероятность вырастает до ~12.7%. Это почти втрое лучше «угадайки».
+Ключевой вопрос: если система помечает зону как опасную, насколько чаще там действительно происходит авария по сравнению с обычным местом?
 
-**Сколько аварий «накрывает» система?**
+| Уровень риска | Доля всех зон | Аварий накрыто | Точность | Эффективность |
+|---|---|---|---|---|
+| Critical (красный) | 1% | 2.9% | 12.7% | **2.8× лучше случайного** |
+| High (оранжевый) | 5% | 11.2% (нараст.) | 9.6% | **2.1× лучше случайного** |
+| Medium (жёлтый) | 20% | 36.4% (нараст.) | 7.6% | **1.7× лучше случайного** |
 
-| Уровень риска | Доля всех слотов | Доля накрытых аварий |
-|---|---|---|
-| Critical (красный) | 1% | 2.9% |
-| Critical + High (красный + оранжевый) | 5% | 11.2% |
-| + Medium (+ жёлтый) | 20% | 36.4% |
-| Все зоны | 100% | 100% |
-
-Смотря на топ 5% зон — красные и оранжевые — можно «накрыть» около **11% всех аварий** за день. Это может звучать скромно, но важен контекст: эти 5% зон находят в **2.2 раза больше** аварий, чем если бы патруль ехал по случайным 5% дорог.
-
-**Важное наблюдение:** 64% аварий происходят в «зелёных» (низкий риск) зонах. Это не ошибка системы — это отражение реальности: большинство аварий случаются неожиданно, в обычных местах. Система не претендует на то, чтобы предсказать каждую аварию. Её ценность — в том, чтобы направить ресурсы туда, где риск *повышен*.
+**Если простыми словами:** Патрульная машина, которая едет в случайное место, находит аварию с вероятностью около 4.5%. Та же машина, направленная в зону из топ 20% по версии системы, находит аварию с вероятностью 7–13% — в зависимости от уровня приоритета. Наблюдая за топ 20% зон, можно охватить более **трети всех аварий** за день.
 
 **Лучшие и худшие дни:**
-- Лучший день: 21 января — система показала lift **5.4×** (аварии в красных зонах случались в 5 раз чаще нормы)
+- Лучший день: 21 января — lift **5.4×** (аварии в красных зонах случались в 5 раз чаще нормы)
 - Средний будний день (особенно среда): lift около **4×**
-- Воскресенье — самый слабый день: lift ~1.8×. Это объяснимо: на выходных паттерны аварий другие (больше ночных, алкогольных, в нетипичных местах), и модель пока хуже их «чувствует»
+- Воскресенье — самый слабый день: lift ~1.8×. На выходных паттерны аварий другие (больше ночных, алкогольных, в нетипичных местах), и модель пока хуже их «чувствует»
 
-**Вывод одной фразой:** Система работает — она стабильно находит опасные места лучше случайного выбора, в большинстве дней существенно лучше. Потенциал для улучшения тоже есть, особенно для выходных дней.
+**Вывод одной фразой:** Система стабильно находит опасные места лучше случайного выбора — в большинстве дней существенно лучше. Это означает, что одни и те же ресурсы патруля, направленные по рекомендации системы, будут работать в 2–5 раз эффективнее.
 
 ---
 
 ### Итог: три ключевых числа, которые нужно помнить
 
-1. **Lift 2.8×** — патруль в красных зонах находит аварии в 2.8 раза чаще, чем при случайном патрулировании (среднее за январь 2026).
+1. **Lift 2.8× для красных зон** — патруль в критических зонах находит аварии в 2.8 раза чаще, чем при случайном патрулировании (среднее за январь 2026).
 
-2. **11% охват при 5% ресурсов** — наблюдая только за критическими и высокими зонами (топ 5% всех зон), система накрывает 11% всех аварий. Это в 2.2 раза эффективнее случайного патрулирования.
+2. **36% охват при 20% ресурсов** — наблюдая за критическими, высокими и средними зонами (топ 20% всех зон), система накрывает больше трети всех реальных аварий. Это в 1.8 раза эффективнее случайного патрулирования.
 
 3. **Прогноз за день вперёд** — система выдаёт предсказание заранее, используя только общедоступные данные о погоде и историческую аварийность. Никакие специальные датчики или дорогостоящие источники данных не нужны.
 
@@ -240,6 +244,43 @@ Backtest (ретроспективное тестирование) — это п
 ---
 
 ## ENGLISH
+
+---
+
+### How the system works — and why it was built this way
+
+#### Where the data comes from
+
+The system was trained on real crash data from California roads for 2023–2025 — official statistics from CalTRANS (California Department of Transportation). Weather data (precipitation, wind, visibility, temperature) comes from Open-Meteo, a free and publicly available meteorological data source providing both historical records and forecasts. No proprietary or expensive data sources are required.
+
+#### Why hexagons?
+
+The state of California is divided into thousands of small hexagonal cells — each approximately 0.5 × 0.5 km. This grid is called H3 (developed by Uber for geospatial analysis). Hexagons are not an arbitrary choice: all neighboring cells are equidistant from a hexagon's center, unlike squares where diagonal neighbors are farther away than side neighbors. This makes spatial pattern analysis more consistent and accurate. Each cell is a **zone**. For every zone and every hour of the day, the system makes an independent prediction.
+
+#### How the model works
+
+The system uses **Gradient Boosting** — one of the most reliable and well-validated machine learning algorithms for classification tasks on tabular data. In simple terms: the algorithm builds hundreds of small rules like "if it's rush hour + wet road + this zone has a history of crashes → high risk," then combines them into a single overall score.
+
+Why not a neural network? Neural networks excel at images, video, and text — unstructured data. For tabular data (which is exactly what we have: date, hour, weather, crash history), Gradient Boosting achieves comparable or better accuracy, trains faster, requires less data, and produces results that are easier to interpret. It is a practical, proven choice for this type of problem.
+
+The model considers **13 factors**: hour of the day, day of the week, month, whether it's a holiday, historical crash rate for the zone, precipitation, wind speed, visibility, weather type, temperature, and road type (freeway or not). The output is a crash probability score from 0 to 1 for each zone at each hour.
+
+#### How the model was trained
+
+The model was trained on 2023–2025 data. January 2026 was deliberately excluded from training and reserved as a "holdout" period — meaning the model never saw this data during training. This is where we evaluate prediction quality. This is standard machine learning practice: an honest exam on data the model has never encountered.
+
+Two separate model versions were also trained: one for weekdays and one for weekends — because crash patterns on weekends differ significantly (different peak hours, different typical causes).
+
+#### Risk tiers — and why green zones are not shown
+
+After the model assigns scores to all zones, they are ranked and each receives a **risk tier**:
+
+- **Critical (red)** — top 1% most dangerous zones
+- **High (orange)** — top 5%
+- **Medium (yellow)** — top 20%
+- **Low (green)** — the remaining 80%
+
+The map and statistics deliberately **do not show green (low) zones**. The reason is straightforward: they represent 80% of all zones, create visual clutter, and provide no actionable value for decision-making. A green zone means "nothing unusual here." A red, orange, or yellow zone means "this warrants attention." That is the core logic of the system: not to predict every crash, but to identify elevated-risk zones where patrol resources will be used most efficiently.
 
 ---
 
@@ -251,32 +292,13 @@ One key thing to understand: the system did not see January 2026 data during tra
 
 ---
 
-### How does the system work overall?
-
-California is divided into thousands of small hexagonal cells (roughly 0.5 × 0.5 km each). Each cell is a **zone**. For every zone and every hour of the day, the system calculates: how likely is a crash here, at this time?
-
-To do this, it looks at 13 factors: hour of the day, day of the week, month, whether it's a holiday, historical crash rate for that zone, precipitation, wind speed, visibility, weather type, temperature, and road type (freeway or not).
-
-This produces a risk score from 0 to 1 (e.g., 0.23 means "23% probability of a crash"). All zones are then ranked, and each is assigned a **risk tier**:
-
-- **Critical (red)** — top 1% most dangerous zones at that hour
-- **High (orange)** — top 5%
-- **Medium (yellow)** — top 20%
-- **Low (green)** — the remaining 80%
-
----
-
 ### Sidebar (left) — controls
 
-**CalTRANS logo** — a reminder of who this system is built for: the California Department of Transportation.
-
-**Date selector** — choose any day from January 2026. The system shows what was predicted and what actually happened on that specific day. The day of the week is shown next to the date (e.g., Saturday).
+**Date selector** — choose any day from January 2026. The system shows what was predicted and what actually happened on that specific day. The day of the week is shown next to the date (e.g., Sunday).
 
 **Map view** — a toggle between two map modes:
 - **Prediction** — the map shows what the system predicted that morning. Zones are colored by risk tier. This answers: "Where did the system look?"
-- **Reality check** — the map shows what actually happened. Zones where a crash really occurred keep their color. Zones with no crash turn grey. This answers: "Did the system get it right?"
-
-**Show 'low' tier zones** — a checkbox that turns green (low-risk) zones on or off. By default they are hidden, because there are so many of them that they clutter the map. It's usually more useful to focus on high-risk zones only.
+- **Reality check** — the map shows what actually happened. Zones where a crash really occurred keep their color. Zones with no crash turn grey and transparent. This answers: "Did the system get it right?"
 
 **Filter by hour of day** — a slider to narrow data to a specific time range. For example, set it to 16:00–19:00 to look only at the evening rush hour. All numbers on the page recalculate based on this filter.
 
@@ -304,15 +326,15 @@ This is a reminder so you don't confuse which mode you're in.
 
 ### Map
 
-The main element of the dashboard. The map shows roads and hexagonal zones as circles.
+The main element of the dashboard. The map shows roads and elevated-risk zones as circles (critical, high, and medium — the top 20% of all zones).
 
-**Circle color** — the zone's risk tier (red = critical, orange = high, yellow = medium, green = low).
+**Circle color** — the zone's risk tier (red = critical, orange = high, yellow = medium).
 
-**Circle size** — also depends on risk tier: red circles are larger, green ones smaller. This makes the most dangerous spots immediately visible.
+**Circle size** — also depends on risk tier: red circles are larger, yellow ones smaller. This makes the most dangerous spots immediately visible.
 
 **In Reality check mode:**
 - Zones with real crashes keep their bright color and a white outline
-- Zones with no crash turn grey and transparent
+- Zones where no crash occurred turn grey and transparent — they remain on the map to show: "the system was watching here, but nothing happened"
 
 **Hovering over a circle** shows a tooltip with the road name and risk tier.
 
@@ -323,8 +345,6 @@ The main element of the dashboard. The map shows roads and hexagonal zones as ci
 - Numerical risk score (e.g., 0.312)
 - How many time slots in this zone had crashes (e.g., "2/8 zone-hours had crashes" means: out of 8 hours checked for this zone, 2 of them had a crash)
 
-**Map legend** (bottom-left corner of the map) — explains the colors. In Reality check mode, a grey "No crash" dot is added.
-
 ---
 
 ### Day summary (below map, left) — daily overview
@@ -333,7 +353,7 @@ Four numbers that give an overall picture of the day:
 
 **Crashes recorded** — total crashes recorded during the selected period. Below the number is the total count of "zone-hour" slots analyzed. For example: "47 crashes out of 12,400 slots" means the system examined 12,400 (zone × hour) pairs, and 47 of them contained a crash.
 
-**Critical zones** — how many time slots were labeled critical risk, what percentage of them actually contained a crash (hit%), and how much better this is than random guessing (e.g., "2.5×" means: crashes happened in critical zones 2.5 times more often than average across all zones).
+**Critical zones** — how many time slots were labeled critical risk, what percentage of them actually contained a crash (hit%), and how much better this is than random guessing (e.g., "2.8×" means: crashes happened in critical zones 2.8 times more often than average).
 
 **High zones** — the same for high-risk zones.
 
@@ -343,9 +363,9 @@ Four numbers that give an overall picture of the day:
 
 ### Legend (below map, right)
 
-Explains the zone colors. Mirrors the map legend but is placed next to the controls for convenience.
+Explains the zone colors.
 
-In **Prediction** mode: "Zones colored by predicted risk tier."
+In **Prediction** mode: "Zones colored by predicted risk tier (top 20%)" — only elevated-risk zones are shown on the map.
 
 In **Reality check** mode: "Crash zones keep tier color. No-crash zones are grey."
 
@@ -383,37 +403,31 @@ If both lines move in a similar pattern (rising and falling together), the syste
 
 Answers the question: "When the system says 'dangerous' — how often is it right?"
 
-Columns:
-
-**Tier** — risk level.
+**Tier** — risk level (critical, high, and medium only).
 
 **Predicted zones** — how many zone-hours were labeled with this risk tier.
 
 **Actual crashes** — how many of those actually contained a crash.
 
-**Precision (hit rate)** — the percentage of hits. For example, "11.2%" for critical means: out of all zone-hours labeled "critical," roughly 1 in 9 actually had a crash.
+**Precision (hit rate)** — the percentage of hits. For example, "12.7%" for critical means: out of all zone-hours labeled "critical," roughly 1 in 8 actually had a crash.
 
-**Lift vs. baseline** — how many times better this tier performs versus random guessing. The baseline is the average crash rate across all zones (typically ~0.3–0.4%). If lift for critical is 2.5×, it means: crashes happen 2.5 times more often in red zones than in an average zone.
+**Lift vs. baseline** — how many times better this tier performs versus random guessing. If lift for critical is 2.8×, it means: crashes happen 2.8 times more often in red zones than in an average zone. This is the key metric of system value.
 
-**In plain words:** If we tell a road patrol "only go to red zones," they will find crashes 2.5 times more often than if they drove random routes. This saves time and resources.
+**In plain words:** If we tell a road patrol "only go to red zones," they will find crashes 2.8 times more often than if they drove random routes. This saves time and resources.
 
 ---
 
 ### Crash capture — share of real crashes caught per tier (bottom table, right)
 
-Answers the question: "What percentage of real crashes did the system manage to 'capture' in its predictions?"
+Answers the question: "What percentage of real crashes did the system capture in its predictions?"
 
-Columns:
-
-**Tier** — risk level.
+**Tier** — risk level (critical, high, and medium only).
 
 **Crashes in tier** — how many real crashes occurred in zones of this tier.
 
 **% of day's crashes** — what share of all crashes that day fell into this tier.
 
-**Cumulative (top→down)** — a running total from top to bottom. For example, if critical = 15% and high = 30%, then the cumulative for high = 45%. This means: by covering only red and orange zones, you can "capture" 45% of all crashes that day.
-
-**In plain words:** If a road patrol monitors only critical and high zones (the top 5% of all zones), they can be present for ~40–50% of all real crashes. The remaining 50–60% occurred in zones the system rated as "medium" or "low" risk — these can still be monitored, but at lower priority.
+**Cumulative (top→down)** — a running total from top to bottom. If critical = 3%, high = 8%, medium = 25%, then cumulative for medium = 36%. This means: by monitoring the top 20% of zones, the system covers more than a third of all crashes that day.
 
 ---
 
@@ -429,39 +443,33 @@ This matters because it proves the results are honest. The model did not see thi
 
 We ran all 31 days of January 2026 through the model and collected the numbers. Here is what they mean in plain terms.
 
-**Scale:** The system analyzed 74,400 zone-hour pairs across the month. Real crashes: 3,353. This means a crash happens in roughly 1 out of every 22 slots on average — crashes are rare events even on dangerous roads.
+**Scale:** The system analyzed 74,400 zone-hour pairs across the month. Real crashes: 3,353. A crash happens in roughly 1 out of every 22 slots on average — crashes are rare events even on dangerous roads.
 
-**How accurate are the red (Critical) zones?**
-On average across the month: out of every 100 zone-hours labeled "critical," **12–13 actually contained a crash**. That is **2.8 times better** than random guessing. On the best days this reached 5× and higher. On the weakest days (typically Sundays or low-crash days) it was around 1.5×.
+**How accurate are the predictions?**
 
-**In plain words:** Imagine you send a patrol car to a random zone out of 100 — it finds a crash with roughly 4.5% probability. If you send it to a red zone based on the system's recommendation — the probability rises to ~12.7%. That is nearly three times better than guessing.
+The key question: when the system flags a zone as dangerous, how much more often does a crash actually occur there compared to an ordinary location?
 
-**How many crashes does the system "capture"?**
+| Risk tier | Share of all zones | Crashes captured | Precision | Efficiency |
+|---|---|---|---|---|
+| Critical (red) | 1% | 2.9% | 12.7% | **2.8× better than random** |
+| High (orange) | 5% | 11.2% (cumul.) | 9.6% | **2.1× better than random** |
+| Medium (yellow) | 20% | 36.4% (cumul.) | 7.6% | **1.7× better than random** |
 
-| Risk tier | Share of all slots | Share of crashes captured |
-|---|---|---|
-| Critical (red) | 1% | 2.9% |
-| Critical + High (red + orange) | 5% | 11.2% |
-| + Medium (+ yellow) | 20% | 36.4% |
-| All zones | 100% | 100% |
-
-By watching the top 5% of zones — red and orange — the system captures about **11% of all crashes** that day. That may sound modest, but context matters: these 5% of zones find **2.2 times more** crashes than a random 5% of roads would.
-
-**An important observation:** 64% of crashes occur in "green" (low-risk) zones. This is not a system failure — it reflects reality: most crashes happen unexpectedly, in ordinary places. The system does not claim to predict every crash. Its value is in directing resources toward places where risk is *elevated*.
+**In plain words:** A patrol car sent to a random location finds a crash with roughly 4.5% probability. The same car directed to a zone in the top 20% by the system finds a crash with 7–13% probability — depending on the priority tier. By monitoring the top 20% of zones, you can cover more than **a third of all crashes** that day.
 
 **Best and worst days:**
 - Best day: January 21 — lift of **5.4×** (crashes in red zones happened 5 times more often than average)
 - Average weekday (especially Wednesday): lift around **4×**
-- Sunday — the weakest day of the week: lift ~1.8×. This is expected: weekend crash patterns differ (more nighttime, alcohol-related, in atypical locations), and the model currently handles them less well
+- Sunday — the weakest day of the week: lift ~1.8×. Weekend crash patterns differ (more nighttime, alcohol-related, in atypical locations), and the model currently handles them less well
 
-**Bottom line in one sentence:** The system works — it consistently finds dangerous locations better than random selection, and on most days it does so by a significant margin. There is clear room to improve further, particularly for weekends.
+**Bottom line in one sentence:** The system consistently finds dangerous locations better than random selection — on most days significantly better. This means the same patrol resources, directed by the system's recommendations, will operate 2–5 times more effectively.
 
 ---
 
 ### Summary: three key numbers to remember
 
-1. **Lift 2.8×** — a patrol covering red zones finds crashes 2.8 times more often than random patrolling (January 2026 average).
+1. **Lift 2.8× for red zones** — a patrol covering critical zones finds crashes 2.8 times more often than random patrolling (January 2026 average).
 
-2. **11% capture with 5% of resources** — by watching only critical and high zones (top 5% of all zones), the system captures 11% of all crashes. That is 2.2 times more efficient than random patrolling.
+2. **36% capture with 20% of resources** — by monitoring critical, high, and medium zones (top 20% of all zones), the system covers more than a third of all real crashes. That is 1.8 times more efficient than random patrolling.
 
 3. **One-day-ahead forecast** — the system generates its prediction in advance, using only publicly available weather data and historical crash rates. No special sensors or expensive data sources are required.

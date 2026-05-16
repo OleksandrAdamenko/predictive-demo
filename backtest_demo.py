@@ -252,7 +252,7 @@ def _build_map_html(zone_rows: tuple, is_reality: bool) -> str:
     # Legend — injected as a Leaflet control so it renders inside the map div,
     # not in the page body. Uses L.Control so position is reliable at all heights.
     legend_rows = ""
-    for t in ["critical", "high", "medium", "low"]:
+    for t in ["critical", "high", "medium"]:
         legend_rows += (
             f'<div style="display:flex;align-items:center;gap:7px;margin-bottom:4px">'
             f'<span style="display:inline-block;width:13px;height:13px;border-radius:50%;'
@@ -406,7 +406,7 @@ with map_col:
         st.markdown('<div class="section-label">Legend</div>', unsafe_allow_html=True)
 
         legend_chips = ""
-        for t in _TIER_ORDER:
+        for t in ["critical", "high", "medium"]:
             legend_chips += (
                 f"<div style='display:inline-flex;align-items:center;gap:5px;"
                 f"margin:0 12px 6px 0'>"
@@ -415,9 +415,18 @@ with map_col:
                 f"<span style='font-size:0.85rem;color:#ddd'>{t.capitalize()}</span>"
                 f"</div>"
             )
+        if _is_reality:
+            legend_chips += (
+                "<div style='display:inline-flex;align-items:center;gap:5px;"
+                "margin:0 12px 6px 0'>"
+                "<span style='display:inline-block;width:13px;height:13px;"
+                "border-radius:50%;background:#aaa;opacity:.5;flex-shrink:0'></span>"
+                "<span style='font-size:0.85rem;color:#ddd'>No crash</span>"
+                "</div>"
+            )
         mode_desc = (
             "<span style='font-size:0.75rem;color:#aaa;display:block;margin-bottom:6px'>"
-            + ("Zones colored by predicted risk tier." if not _is_reality
+            + ("Zones colored by predicted risk tier (top 20%)." if not _is_reality
                else "Crash zones keep tier color. No-crash zones are grey.")
             + "</span>"
         )
@@ -456,7 +465,7 @@ with tbl_left:
         unsafe_allow_html=True,
     )
     prec_rows = []
-    for tier in _TIER_ORDER:
+    for tier in ["critical", "high", "medium"]:
         sub  = df[df["risk_tier"] == tier]
         n    = len(sub)
         c    = int(sub["crash_occurred"].sum())
@@ -477,7 +486,7 @@ with tbl_right:
         unsafe_allow_html=True,
     )
     cap_rows, cumul = [], 0
-    for tier in _TIER_ORDER:
+    for tier in ["critical", "high", "medium"]:
         sub    = df[df["risk_tier"] == tier]
         c      = int(sub["crash_occurred"].sum())
         cumul += c
