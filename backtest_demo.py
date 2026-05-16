@@ -80,10 +80,10 @@ st.markdown("""
 
 with st.sidebar:
     st.markdown(
-        "<div style='font-size:1.35rem;font-weight:800;letter-spacing:.02em;"
-        "color:#fff;line-height:1.2;padding:4px 0 2px'>🚦 CalTRANS</div>"
-        "<div style='font-size:0.78rem;color:#aaa;margin-bottom:8px'>"
-        "California Dept. of Transportation</div>",
+        "<div style='font-size:1.7rem;font-weight:800;letter-spacing:.01em;"
+        "color:#fff;line-height:1.1;padding:4px 0 2px'>RoadIQ</div>"
+        "<div style='font-size:0.85rem;color:#aaa;margin-bottom:8px'>"
+        "Crash Predictive System</div>",
         unsafe_allow_html=True,
     )
     st.title("Backtest Replay")
@@ -113,11 +113,6 @@ with st.sidebar:
             "**Reality check** — zones where crashes actually occurred keep their "
             "tier color; zones with no crashes turn grey."
         ),
-    )
-
-    show_low = st.checkbox(
-        "Show 'low' tier zones", value=False,
-        help="Low-tier zones dominate the map — hide them for clarity.",
     )
 
     st.divider()
@@ -158,7 +153,7 @@ df = df_all[
     (df_all["slot_hour"] <= hour_filter[1])
 ].copy()
 
-df_map = df if show_low else df[df["risk_tier"] != "low"]
+df_map = df[df["risk_tier"] != "low"]
 
 zone_summary = (
     df_map
@@ -238,10 +233,12 @@ def _build_map_html(zone_rows: tuple, is_reality: bool) -> str:
             fc, fo = _TIER_COLOR[tier], 0.78
             sc, wt = _TIER_COLOR[tier], 1
         else:
-            if not has_crash:
-                continue  # hide no-crash zones in Reality check — they add noise
-            fc, fo = _TIER_COLOR[tier], 0.92
-            sc, wt = "#ffffff", 2
+            if has_crash:
+                fc, fo = _TIER_COLOR[tier], 0.92
+                sc, wt = "#ffffff", 2
+            else:
+                fc, fo = "#aaaaaa", 0.20
+                sc, wt = "#999999", 0.5
 
         folium.CircleMarker(
             location=[lat, lng],
@@ -265,8 +262,10 @@ def _build_map_html(zone_rows: tuple, is_reality: bool) -> str:
     if is_reality:
         legend_rows += (
             '<div style="border-top:1px solid #ccc;margin:6px 0 5px"></div>'
-            '<div style="color:#555;font-size:12px;font-style:italic">'
-            'Only zones with real crashes shown</div>'
+            '<div style="display:flex;align-items:center;gap:7px">'
+            '<span style="display:inline-block;width:13px;height:13px;border-radius:50%;'
+            'flex-shrink:0;background:#aaa;opacity:.45"></span>'
+            '<span style="color:#111;font-size:13px">No crash</span></div>'
         )
 
     # Inject as a proper Leaflet control (bottomleft) via a <script> block
@@ -419,7 +418,7 @@ with map_col:
         mode_desc = (
             "<span style='font-size:0.75rem;color:#aaa;display:block;margin-bottom:6px'>"
             + ("Zones colored by predicted risk tier." if not _is_reality
-               else "Only zones where crashes occurred are shown, colored by predicted tier.")
+               else "Crash zones keep tier color. No-crash zones are grey.")
             + "</span>"
         )
         st.markdown(
