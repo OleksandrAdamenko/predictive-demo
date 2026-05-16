@@ -28,8 +28,8 @@ _TIER_COLOR = {
 _TIER_RADIUS = {"critical": 10, "high": 8, "medium": 6, "low": 4}
 _TIER_ORDER  = ["critical", "high", "medium", "low"]
 
-_MAP_CENTER = [38.58, -121.49]
-_MAP_ZOOM   = 9
+_MAP_CENTER = [38.12, -121.73]
+_MAP_ZOOM   = 8
 
 _AVAILABLE_DATES = sorted(
     p.stem.replace("CA_backtest_", "")
@@ -87,7 +87,7 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     st.title("Backtest Replay")
-    st.caption("District 3 — Sacramento / Bay Area corridor")
+    st.caption("Sacramento / Bay Area corridor — January 2026")
     st.divider()
 
     if not _AVAILABLE_DATES:
@@ -143,6 +143,44 @@ def load_day(date_str: str) -> pd.DataFrame:
     return df
 
 
+@st.cache_data(show_spinner=False)
+def load_all_days() -> pd.DataFrame:
+    """Load all 31 days — used for cross-day zone reliability stats."""
+    frames = []
+    for d in _AVAILABLE_DATES:
+        path = _DATA_DIR / f"CA_backtest_{d}.csv"
+        if path.exists():
+            df = pd.read_csv(path)
+            df["risk_tier"] = df["risk_tier"].fillna("low")
+            df["date"] = d
+            frames.append(df)
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+@st.cache_data(show_spinner=False)
+def compute_zone_reliability(all_days: pd.DataFrame) -> pd.DataFrame:
+    """
+    For each zone that appeared in critical/high/medium at least once:
+    count how many distinct days (out of 31) had a real crash there.
+    """
+    n_days = len(_AVAILABLE_DATES)
+    sub = all_days[all_days["risk_tier"].isin(["critical", "high", "medium"])]
+    # per zone × date: was there any crash?
+    daily = (
+        sub.groupby(["hotspot_id", "primary_road", "date"])["crash_occurred"]
+        .max()
+        .reset_index()
+    )
+    stats = (
+        daily.groupby(["hotspot_id", "primary_road"])
+        .agg(days_in_tier=("date", "nunique"),
+             days_with_crash=("crash_occurred", "sum"))
+        .reset_index()
+    )
+    stats["hit_pct"] = (stats["days_with_crash"] / n_days * 100).round(1)
+    return stats.sort_values("days_with_crash", ascending=False)
+
+
 df_all = load_day(selected_date_str)
 if df_all.empty:
     st.error(f"No data for {selected_date_str}.")
@@ -190,7 +228,7 @@ st.markdown(
     f"<span style='font-size:1.15rem;font-weight:700'>{selected_date_str}</span>"
     f"&nbsp;&nbsp;<span style='color:#888;font-size:0.9rem'>{dow}</span>"
     f"&nbsp;&nbsp;·&nbsp;&nbsp;"
-    f"<span style='color:#888;font-size:0.85rem'>District 3</span>"
+    f"<span style='color:#888;font-size:0.85rem'>Sacramento / Bay Area</span>"
     f"&nbsp;&nbsp;·&nbsp;&nbsp;"
     f"<span style='color:#888;font-size:0.85rem'>{hour_label}</span>"
     f"&nbsp;&nbsp;·&nbsp;&nbsp;"
@@ -209,8 +247,18 @@ st.divider()
 # ──────────────────────────────────────────────────────────────────────────────
 
 @st.cache_data(show_spinner=False)
-def _build_map_html(zone_rows: tuple, is_reality: bool) -> str:
+def _build_map_html(zone_rows: tuple) -> str:
+    """
+    Build a single map HTML containing BOTH prediction and reality-check layers.
+    Layers are toggled instantly via postMessage — no iframe reload on mode switch.
+    """
+    import json
+
     m = folium.Map(location=_MAP_CENTER, zoom_start=_MAP_ZOOM, tiles="CartoDB positron")
+
+    # Serialise marker data for both modes into JS arrays
+    pred_markers = []
+    real_markers = []
 
     for row in zone_rows:
         tier      = row["worst_tier"]
@@ -220,102 +268,154 @@ def _build_map_html(zone_rows: tuple, is_reality: bool) -> str:
         score     = row["max_score"]
         n_c, n_s  = int(row["n_crashes"]), int(row["n_slots"])
         prec_str  = f"{n_c}/{n_s} zone-hours had crashes" if n_s > 0 else "—"
+        radius    = _TIER_RADIUS[tier]
+        color     = _TIER_COLOR[tier]
 
-        popup_html = (
+        popup = (
             f"<b>{road}</b><br>"
             f"Zone {int(row['hotspot_id'])} · Tier: <b>{tier.upper()}</b><br>"
-            f"Score: {score:.3f}<br>"
-            f"{prec_str}"
+            f"Score: {score:.3f}<br>{prec_str}"
         )
-        tooltip = f"{road} — {'CRASH ✓' if (is_reality and has_crash) else tier.upper()}"
 
-        if not is_reality:
-            fc, fo = _TIER_COLOR[tier], 0.78
-            sc, wt = _TIER_COLOR[tier], 1
+        pred_markers.append({
+            "lat": lat, "lng": lng, "radius": radius,
+            "color": color, "fillColor": color, "fillOpacity": 0.78, "weight": 1,
+            "popup": popup, "tooltip": f"{road} — {tier.upper()}",
+        })
+
+        if has_crash:
+            real_markers.append({
+                "lat": lat, "lng": lng, "radius": radius,
+                "color": "#ffffff", "fillColor": color, "fillOpacity": 0.92, "weight": 2,
+                "popup": popup, "tooltip": f"{road} — CRASH ✓",
+            })
         else:
-            if has_crash:
-                fc, fo = _TIER_COLOR[tier], 0.92
-                sc, wt = "#ffffff", 2
-            else:
-                fc, fo = "#aaaaaa", 0.20
-                sc, wt = "#999999", 0.5
+            real_markers.append({
+                "lat": lat, "lng": lng, "radius": radius,
+                "color": "#999999", "fillColor": "#aaaaaa", "fillOpacity": 0.20, "weight": 0.5,
+                "popup": popup, "tooltip": f"{road} — {tier.upper()} (no crash)",
+            })
 
-        folium.CircleMarker(
-            location=[lat, lng],
-            radius=_TIER_RADIUS[tier],
-            color=sc, weight=wt,
-            fill=True, fill_color=fc, fill_opacity=fo,
-            popup=folium.Popup(popup_html, max_width=260),
-            tooltip=tooltip,
-        ).add_to(m)
+    legend_pred = "".join(
+        f'<div style="display:flex;align-items:center;gap:7px;margin-bottom:4px">'
+        f'<span style="display:inline-block;width:13px;height:13px;border-radius:50%;'
+        f'flex-shrink:0;background:{_TIER_COLOR[t]}"></span>'
+        f'<span style="color:#111;font-size:13px">{t.capitalize()}</span></div>'
+        for t in ["critical", "high", "medium"]
+    )
+    legend_real = legend_pred + (
+        '<div style="border-top:1px solid #ccc;margin:6px 0 5px"></div>'
+        '<div style="display:flex;align-items:center;gap:7px">'
+        '<span style="display:inline-block;width:13px;height:13px;border-radius:50%;'
+        'flex-shrink:0;background:#aaa;opacity:.45"></span>'
+        '<span style="color:#111;font-size:13px">No crash</span></div>'
+    )
 
-    # Legend — injected as a Leaflet control so it renders inside the map div,
-    # not in the page body. Uses L.Control so position is reliable at all heights.
-    legend_rows = ""
-    for t in ["critical", "high", "medium"]:
-        legend_rows += (
-            f'<div style="display:flex;align-items:center;gap:7px;margin-bottom:4px">'
-            f'<span style="display:inline-block;width:13px;height:13px;border-radius:50%;'
-            f'flex-shrink:0;background:{_TIER_COLOR[t]}"></span>'
-            f'<span style="color:#111;font-size:13px">{t.capitalize()}</span></div>'
-        )
-    if is_reality:
-        legend_rows += (
-            '<div style="border-top:1px solid #ccc;margin:6px 0 5px"></div>'
-            '<div style="display:flex;align-items:center;gap:7px">'
-            '<span style="display:inline-block;width:13px;height:13px;border-radius:50%;'
-            'flex-shrink:0;background:#aaa;opacity:.45"></span>'
-            '<span style="color:#111;font-size:13px">No crash</span></div>'
-        )
-
-    # Inject as a proper Leaflet control (bottomleft) via a <script> block
-    legend_js = f"""
+    dual_js = f"""
     <script>
-    (function waitForLeaflet() {{
-        if (typeof L === 'undefined') {{ setTimeout(waitForLeaflet, 100); return; }}
-        var legend = L.control({{position: 'bottomleft'}});
-        legend.onAdd = function() {{
-            var div = L.DomUtil.create('div');
-            div.style.cssText = 'background:rgba(255,255,255,0.96);padding:10px 14px;'
-                + 'border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.25);'
-                + 'font-family:sans-serif;pointer-events:none';
-            div.innerHTML = '<div style="font-weight:700;color:#111;font-size:13px;'
-                + 'margin-bottom:7px">Risk tier</div>{legend_rows}';
-            return div;
-        }};
-        // find the map instance — Leaflet stores it on the map div
-        var mapDivs = document.querySelectorAll('.folium-map');
-        if (mapDivs.length) {{
-            var mapId = mapDivs[0].id;
-            if (window[mapId]) legend.addTo(window[mapId]);
+    (function() {{
+        var predData = {json.dumps(pred_markers)};
+        var realData = {json.dumps(real_markers)};
+        var legendPred = {json.dumps(legend_pred)};
+        var legendReal = {json.dumps(legend_real)};
+        var predLayer = null, realLayer = null, legendCtrl = null;
+        var currentMode = 'prediction';
+
+        function waitForLeaflet() {{
+            if (typeof L === 'undefined') {{ setTimeout(waitForLeaflet, 80); return; }}
+            var mapDivs = document.querySelectorAll('.folium-map');
+            if (!mapDivs.length) {{ setTimeout(waitForLeaflet, 80); return; }}
+            var mapObj = window[mapDivs[0].id];
+            if (!mapObj) {{ setTimeout(waitForLeaflet, 80); return; }}
+
+            function makeLayer(data) {{
+                var lg = L.layerGroup();
+                data.forEach(function(d) {{
+                    L.circleMarker([d.lat, d.lng], {{
+                        radius: d.radius, color: d.color, weight: d.weight,
+                        fillColor: d.fillColor, fillOpacity: d.fillOpacity, fill: true
+                    }}).bindPopup(d.popup).bindTooltip(d.tooltip).addTo(lg);
+                }});
+                return lg;
+            }}
+
+            predLayer = makeLayer(predData);
+            realLayer = makeLayer(realData);
+            predLayer.addTo(mapObj);
+
+            // Legend control
+            legendCtrl = L.control({{position: 'bottomleft'}});
+            legendCtrl.onAdd = function() {{
+                var div = L.DomUtil.create('div');
+                div.style.cssText = 'background:rgba(255,255,255,0.96);padding:10px 14px;'
+                    + 'border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.25);'
+                    + 'font-family:sans-serif;pointer-events:none';
+                div.innerHTML = '<div style="font-weight:700;color:#111;font-size:13px;'
+                    + 'margin-bottom:7px">Risk tier</div>' + legendPred;
+                legendCtrl._div = div;
+                return div;
+            }};
+            legendCtrl.addTo(mapObj);
+
+            // Listen for mode toggle from Streamlit parent
+            window.addEventListener('message', function(e) {{
+                var mode = e.data && e.data.roadiq_mode;
+                if (!mode || mode === currentMode) return;
+                currentMode = mode;
+                if (mode === 'reality') {{
+                    mapObj.removeLayer(predLayer);
+                    realLayer.addTo(mapObj);
+                    if (legendCtrl._div) legendCtrl._div.innerHTML =
+                        '<div style="font-weight:700;color:#111;font-size:13px;margin-bottom:7px">Risk tier</div>'
+                        + legendReal;
+                }} else {{
+                    mapObj.removeLayer(realLayer);
+                    predLayer.addTo(mapObj);
+                    if (legendCtrl._div) legendCtrl._div.innerHTML =
+                        '<div style="font-weight:700;color:#111;font-size:13px;margin-bottom:7px">Risk tier</div>'
+                        + legendPred;
+                }}
+            }});
         }}
+        waitForLeaflet();
     }})();
     </script>
     """
-    m.get_root().html.add_child(folium.Element(legend_js))
-
+    m.get_root().html.add_child(folium.Element(dual_js))
     return m._repr_html_()
 
 
 _zone_rows  = tuple(zone_summary.to_dict(orient="records"))
 _is_reality = (view_mode == "Reality check")
-map_html    = _build_map_html(_zone_rows, _is_reality)
+# Map HTML is keyed only on zone_rows (date + hour filter) — NOT on view_mode.
+# Mode switching is handled in-browser via postMessage → no iframe reload.
+map_html    = _build_map_html(_zone_rows)
 
 # Pre-compute stats shared across panels
-top10 = (
-    df[df["risk_tier"].isin(["critical", "high"])]
-    .sort_values("risk_score", ascending=False)
-    .drop_duplicates("hotspot_id")
-    .head(10)[["primary_road", "risk_tier", "risk_score", "crash_occurred"]]
-    .rename(columns={
-        "primary_road":   "Road",
-        "risk_tier":      "Tier",
-        "risk_score":     "Score",
-        "crash_occurred": "Crash?",
-    })
+
+# Cross-day reliability: zones most consistently hit across all 31 days
+_all_days    = load_all_days()
+_reliability = compute_zone_reliability(_all_days)
+
+# Today's crash status per zone (max over all hours of the day)
+today_crash = (
+    df_all.groupby("hotspot_id")["crash_occurred"].max().reset_index()
+    .rename(columns={"crash_occurred": "today_crash"})
 )
-top10["Crash?"] = top10["Crash?"].map({1: "✅", 0: "—"})
-top10["Score"]  = top10["Score"].round(3)
+top10_reliability = (
+    _reliability.head(10)
+    .merge(today_crash, on="hotspot_id", how="left")
+)
+top10_reliability["today_crash"] = top10_reliability["today_crash"].fillna(0)
+top10 = top10_reliability[["primary_road", "days_with_crash", "hit_pct", "today_crash"]].rename(
+    columns={
+        "primary_road":    "Road",
+        "days_with_crash": "Crash days (Jan)",
+        "hit_pct":         "% of month",
+        "today_crash":     "Today?",
+    }
+)
+top10["Today?"] = top10["Today?"].map({1.0: "✅", 0.0: "—"})
 
 hourly = (
     df_all
@@ -359,6 +459,13 @@ with map_col:
     )
     st.markdown(mode_badge, unsafe_allow_html=True)
     components.html(map_html, height=620, scrolling=False)
+    # Send current mode into the iframe via postMessage so JS can switch layers
+    # without reloading the map. The iframe receives this on every rerun.
+    _mode_str = "reality" if _is_reality else "prediction"
+    components.html(
+        f"<script>window.parent.frames[0].postMessage({{roadiq_mode:'{_mode_str}'}}, '*');</script>",
+        height=0,
+    )
 
     # Sub-row: Day summary (left) + Legend (right), both in two columns
     sub_left, sub_right = st.columns([2, 1])
@@ -438,7 +545,7 @@ with map_col:
 
 # ── Right column: Top-10 + hourly chart ──────────────────────────────────────
 with right_col:
-    st.markdown('<div class="section-label">Top-10 highest-risk zones</div>',
+    st.markdown('<div class="section-label">Top-10 most consistently hit zones (Jan 2026)</div>',
                 unsafe_allow_html=True)
     st.dataframe(top10, hide_index=True, use_container_width=True, height=390)
 
