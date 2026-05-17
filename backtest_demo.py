@@ -185,7 +185,7 @@ def load_day(date_str: str) -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False)
 def load_all_days() -> pd.DataFrame:
-    """Load all 31 days — used for cross-day zone reliability stats."""
+    """Load all 31 days from data/ — used for cross-day zone reliability stats."""
     frames = []
     for d in _AVAILABLE_DATES:
         path = _DATA_DIR / f"CA_backtest_{d}.csv"
@@ -198,11 +198,13 @@ def load_all_days() -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def compute_zone_reliability(all_days: pd.DataFrame, dist_id: int) -> pd.DataFrame:
+def compute_zone_reliability(dist_id: int) -> pd.DataFrame:
     """
-    For each zone that appeared in critical/high/medium at least once:
-    count how many distinct days (out of 31) had a real crash there.
+    Load all 31 days and compute, per zone, how many days had a real crash
+    while the zone was in critical/high/medium tier.
+    Cache key is dist_id only — no DataFrame hashing overhead.
     """
+    all_days = load_all_days()
     n_days = len(_AVAILABLE_DATES)
     filtered = all_days if dist_id == 0 else all_days[all_days["district_id"] == float(dist_id)]
     sub = filtered[filtered["risk_tier"].isin(["critical", "high", "medium"])]
@@ -381,8 +383,7 @@ map_html    = _build_map_html(_zone_rows, _is_reality, district_id)
 # Pre-compute stats shared across panels
 
 # Cross-day reliability: zones most consistently hit across all 31 days
-_all_days    = load_all_days()
-_reliability = compute_zone_reliability(_all_days, district_id)
+_reliability = compute_zone_reliability(district_id)
 
 # Today's crash status per zone (max over all hours of the day)
 today_crash = (
