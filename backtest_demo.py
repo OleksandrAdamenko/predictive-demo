@@ -31,18 +31,18 @@ _TIER_ORDER  = ["critical", "high", "medium", "low"]
 # District display names — all 12 CalTRANS districts with zone counts
 _DISTRICT_NAMES = {
     0:  "All California",
-    1:  "D1 — North Coast (32 zones)",
-    2:  "D2 — Shasta / Lassen (3 zones)",
+    1:  "D1 — North Coast (30 zones)",
+    2:  "D2 — Shasta / Lassen (6 zones)",
     3:  "D3 — Sacramento Valley",
     4:  "D4 — Bay Area",
     5:  "D5 — Central Coast",
     6:  "D6 — Fresno / San Joaquin",
     7:  "D7 — Los Angeles",
     8:  "D8 — San Bernardino / Riverside",
-    9:  "D9 — Eastern Sierra (3 zones)",
+    9:  "D9 — Eastern Sierra (6 zones)",
     10: "D10 — Stockton / Modesto",
     11: "D11 — San Diego",
-    12: "D12 — Orange County (3 zones)",
+    12: "D12 — Orange County",
 }
 
 # Map center and zoom per district (lat, lng, zoom)
