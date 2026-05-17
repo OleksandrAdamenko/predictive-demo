@@ -278,8 +278,6 @@ st.markdown(
     f"<span style='color:#888;font-size:0.85rem'>{district_label}</span>"
     f"&nbsp;&nbsp;·&nbsp;&nbsp;"
     f"<span style='color:#888;font-size:0.85rem'>{hour_label}</span>"
-    f"&nbsp;&nbsp;·&nbsp;&nbsp;"
-    f"<span style='color:#888;font-size:0.85rem'>{total_zones:,} zones on map</span>"
     f"</div>",
     unsafe_allow_html=True,
 )
