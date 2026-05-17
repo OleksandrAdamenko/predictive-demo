@@ -200,27 +200,34 @@ def load_all_days() -> pd.DataFrame:
 @st.cache_data(show_spinner=False)
 def compute_zone_reliability(dist_id: int) -> pd.DataFrame:
     """
-    Load all 31 days and compute, per zone, how many days had a real crash
-    while the zone was in critical/high/medium tier.
-    Cache key is dist_id only — no DataFrame hashing overhead.
+    Per zone: crash_days (any tier), hits (model in tier AND crash occurred).
+    Sorted by hits descending.
     """
     all_days = load_all_days()
-    n_days = len(_AVAILABLE_DATES)
     filtered = all_days if dist_id == 0 else all_days[all_days["district_id"] == float(dist_id)]
+
+    # Total crash days per zone across all tiers
+    crash_days = (
+        filtered.groupby(["hotspot_id", "primary_road", "date"])["crash_occurred"]
+        .max().reset_index()
+        .groupby(["hotspot_id", "primary_road"])["crash_occurred"]
+        .sum().reset_index()
+        .rename(columns={"crash_occurred": "crash_days"})
+    )
+
+    # Hits: zone was in critical/high/medium AND a crash occurred that day
     sub = filtered[filtered["risk_tier"].isin(["critical", "high", "medium"])]
-    daily = (
+    hits = (
         sub.groupby(["hotspot_id", "primary_road", "date"])["crash_occurred"]
-        .max()
-        .reset_index()
+        .max().reset_index()
+        .groupby(["hotspot_id", "primary_road"])["crash_occurred"]
+        .sum().reset_index()
+        .rename(columns={"crash_occurred": "hits"})
     )
-    stats = (
-        daily.groupby(["hotspot_id", "primary_road"])
-        .agg(days_in_tier=("date", "nunique"),
-             days_with_crash=("crash_occurred", "sum"))
-        .reset_index()
-    )
-    stats["hit_pct"] = (stats["days_with_crash"] / n_days * 100).round(1)
-    return stats.sort_values("days_with_crash", ascending=False)
+
+    stats = crash_days.merge(hits, on=["hotspot_id", "primary_road"], how="left")
+    stats["hits"] = stats["hits"].fillna(0).astype(int)
+    return stats.sort_values("hits", ascending=False)
 
 
 df_all = load_day(selected_date_str)
@@ -431,12 +438,12 @@ top10_reliability = (
     .merge(today_crash, on="hotspot_id", how="left")
 )
 top10_reliability["today_crash"] = top10_reliability["today_crash"].fillna(0)
-top10 = top10_reliability[["primary_road", "days_with_crash", "hit_pct", "today_crash"]].rename(
+top10 = top10_reliability[["primary_road", "crash_days", "hits", "today_crash"]].rename(
     columns={
-        "primary_road":    "Road",
-        "days_with_crash": "Crash days",
-        "hit_pct":         "% of month",
-        "today_crash":     "Today?",
+        "primary_road": "Road",
+        "crash_days":   "Crash days",
+        "hits":         "Hits",
+        "today_crash":  "Today?",
     }
 )
 top10["Today?"] = top10["Today?"].map({1.0: "✅", 0.0: "—"})
