@@ -28,30 +28,38 @@ _TIER_COLOR = {
 _TIER_RADIUS = {"critical": 10, "high": 8, "medium": 6, "low": 4}
 _TIER_ORDER  = ["critical", "high", "medium", "low"]
 
-# District display names (CalTRANS districts present in the data)
+# District display names — all 12 CalTRANS districts with zone counts
 _DISTRICT_NAMES = {
     0:  "All California",
+    1:  "D1 — North Coast (32 zones)",
+    2:  "D2 — Shasta / Lassen (3 zones)",
     3:  "D3 — Sacramento Valley",
     4:  "D4 — Bay Area",
     5:  "D5 — Central Coast",
     6:  "D6 — Fresno / San Joaquin",
     7:  "D7 — Los Angeles",
     8:  "D8 — San Bernardino / Riverside",
+    9:  "D9 — Eastern Sierra (3 zones)",
     10: "D10 — Stockton / Modesto",
     11: "D11 — San Diego",
+    12: "D12 — Orange County (3 zones)",
 }
 
 # Map center and zoom per district (lat, lng, zoom)
 _DISTRICT_MAP = {
-    0:  ([36.5,  -119.5], 6),   # All CA
+    0:  ([36.5,  -119.5],  6),  # All CA
+    1:  ([40.42, -123.62], 8),  # North Coast
+    2:  ([40.29, -122.17], 8),  # Shasta / Lassen
     3:  ([38.12, -121.73], 8),  # Sacramento Valley
     4:  ([37.36, -122.00], 9),  # Bay Area
     5:  ([36.56, -120.52], 8),  # Central Coast
     6:  ([35.65, -119.09], 8),  # Fresno / San Joaquin
     7:  ([33.98, -117.99], 9),  # Los Angeles
     8:  ([33.48, -116.88], 8),  # San Bernardino / Riverside
+    9:  ([35.62, -117.67], 9),  # Eastern Sierra
     10: ([37.98, -120.37], 9),  # Stockton / Modesto
     11: ([32.76, -117.01], 10), # San Diego
+    12: ([33.45, -117.63], 10), # Orange County
 }
 
 _AVAILABLE_DATES = sorted(
