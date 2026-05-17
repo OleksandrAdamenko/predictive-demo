@@ -262,7 +262,7 @@ total_zones = df["hotspot_id"].nunique()
 tier_counts = df.groupby("risk_tier")["crash_occurred"].agg(n_slots="count", n_crashes="sum")
 dow         = _weekday_label(selected_date_str)
 hour_label  = ("All hours" if hour_filter == (0, 23)
-               else f"{hour_filter[0]:02d}:00 – {hour_filter[1]:02d}:59")
+               else f"{hour_filter[0]:02d}:00 – {hour_filter[1]:02d}:00")
 global_rate = df["crash_occurred"].mean()
 
 # ──────────────────────────────────────────────────────────────────────────────
