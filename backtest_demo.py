@@ -45,21 +45,21 @@ _DISTRICT_NAMES = {
     12: "D12 — Orange County",
 }
 
-# Map center and zoom per district (lat, lng, zoom)
-_DISTRICT_MAP = {
-    0:  ([36.5,  -119.5],  6),  # All CA
-    1:  ([40.42, -123.62], 8),  # North Coast
-    2:  ([40.29, -122.17], 8),  # Shasta / Lassen
-    3:  ([38.12, -121.73], 8),  # Sacramento Valley
-    4:  ([37.36, -122.00], 9),  # Bay Area
-    5:  ([36.56, -120.52], 8),  # Central Coast
-    6:  ([35.65, -119.09], 8),  # Fresno / San Joaquin
-    7:  ([33.98, -117.99], 9),  # Los Angeles
-    8:  ([33.48, -116.88], 8),  # San Bernardino / Riverside
-    9:  ([35.62, -117.67], 9),  # Eastern Sierra
-    10: ([37.98, -120.37], 9),  # Stockton / Modesto
-    11: ([32.76, -117.01], 10), # San Diego
-    12: ([33.45, -117.63], 10), # Orange County
+# District fit_bounds: [[sw_lat, sw_lng], [ne_lat, ne_lng]] from GeoJSON
+_DISTRICT_BOUNDS = {
+    0:  [[32.53, -124.48], [42.00, -114.13]],  # All CA
+    1:  [[38.67, -124.48], [42.00, -122.34]],
+    2:  [[39.60, -123.72], [42.01, -120.00]],
+    3:  [[38.02, -122.94], [40.15, -119.88]],
+    4:  [[36.89, -123.63], [38.86, -121.21]],
+    5:  [[34.33, -122.32], [37.29, -119.44]],
+    6:  [[34.79, -120.92], [37.78, -117.98]],
+    7:  [[33.66, -119.50], [34.90, -117.65]],
+    8:  [[33.43, -117.80], [35.81, -114.13]],
+    9:  [[34.82, -119.65], [38.71, -115.65]],
+    10: [[36.74, -121.58], [38.93, -119.20]],
+    11: [[32.53, -117.61], [33.51, -114.46]],
+    12: [[33.33, -118.13], [33.95, -117.41]],
 }
 
 _AVAILABLE_DATES = sorted(
@@ -305,13 +305,15 @@ def _load_districts_geojson() -> dict:
 
 @st.cache_data(show_spinner=False)
 def _build_map_html(zone_rows: tuple, is_reality: bool, dist_id: int) -> str:
-    center, zoom = _DISTRICT_MAP.get(dist_id, _DISTRICT_MAP[0])
-    m = folium.Map(location=center, zoom_start=zoom, tiles="CartoDB positron")
+    bounds = _DISTRICT_BOUNDS.get(dist_id, _DISTRICT_BOUNDS[0])
+    # Start with a rough center; fit_bounds JS will adjust after render
+    center = [(bounds[0][0] + bounds[1][0]) / 2, (bounds[0][1] + bounds[1][1]) / 2]
+    m = folium.Map(location=center, zoom_start=6, tiles="CartoDB positron")
+    m.fit_bounds(bounds)
 
-    # District boundary overlay
+    # District boundary overlay — no tooltip, no popup
     gj = _load_districts_geojson()
     if gj:
-        # If a specific district is selected, highlight it; otherwise show all
         if dist_id != 0:
             features = [f for f in gj["features"]
                         if int(f["properties"]["DISTRICT"]) == dist_id]
@@ -319,24 +321,19 @@ def _build_map_html(zone_rows: tuple, is_reality: bool, dist_id: int) -> str:
         else:
             gj_filtered = gj
 
-        def _district_style(feature):
-            d = int(feature["properties"]["DISTRICT"])
-            is_selected = (dist_id == 0 or d == dist_id)
-            return {
-                "color":       "#2563eb" if is_selected else "#6b7280",
-                "weight":      2 if is_selected else 1,
-                "fillOpacity": 0.04 if is_selected else 0.0,
-                "fillColor":   "#2563eb",
-            }
-
         folium.GeoJson(
             gj_filtered,
-            style_function=_district_style,
-            tooltip=folium.GeoJsonTooltip(
-                fields=["DISTRICT"],
-                aliases=["District:"],
-                localize=True,
-            ),
+            style_function=lambda _: {
+                "color":       "#2563eb",
+                "weight":      2,
+                "fillOpacity": 0.03,
+                "fillColor":   "#2563eb",
+            },
+            highlight_function=lambda _: {
+                "color":       "#2563eb",
+                "weight":      2,
+                "fillOpacity": 0.03,
+            },
         ).add_to(m)
 
     for row in zone_rows:
