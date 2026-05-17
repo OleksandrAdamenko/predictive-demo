@@ -294,9 +294,50 @@ st.divider()
 # ──────────────────────────────────────────────────────────────────────────────
 
 @st.cache_data(show_spinner=False)
+def _load_districts_geojson() -> dict:
+    path = _DATA_DIR / "Caltrans_Districts.geojson"
+    if not path.exists():
+        return {}
+    import json
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+@st.cache_data(show_spinner=False)
 def _build_map_html(zone_rows: tuple, is_reality: bool, dist_id: int) -> str:
     center, zoom = _DISTRICT_MAP.get(dist_id, _DISTRICT_MAP[0])
     m = folium.Map(location=center, zoom_start=zoom, tiles="CartoDB positron")
+
+    # District boundary overlay
+    gj = _load_districts_geojson()
+    if gj:
+        # If a specific district is selected, highlight it; otherwise show all
+        if dist_id != 0:
+            features = [f for f in gj["features"]
+                        if int(f["properties"]["DISTRICT"]) == dist_id]
+            gj_filtered = {**gj, "features": features}
+        else:
+            gj_filtered = gj
+
+        def _district_style(feature):
+            d = int(feature["properties"]["DISTRICT"])
+            is_selected = (dist_id == 0 or d == dist_id)
+            return {
+                "color":       "#2563eb" if is_selected else "#6b7280",
+                "weight":      2 if is_selected else 1,
+                "fillOpacity": 0.04 if is_selected else 0.0,
+                "fillColor":   "#2563eb",
+            }
+
+        folium.GeoJson(
+            gj_filtered,
+            style_function=_district_style,
+            tooltip=folium.GeoJsonTooltip(
+                fields=["DISTRICT"],
+                aliases=["District:"],
+                localize=True,
+            ),
+        ).add_to(m)
 
     for row in zone_rows:
         tier      = row["worst_tier"]
