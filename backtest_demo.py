@@ -17,7 +17,7 @@ import streamlit.components.v1 as components
 # Config
 # ──────────────────────────────────────────────────────────────────────────────
 
-_DATA_DIR = Path("data/analyzed")
+_DATA_DIR = Path("data")
 
 _TIER_COLOR = {
     "critical": "#e53935",
@@ -28,8 +28,31 @@ _TIER_COLOR = {
 _TIER_RADIUS = {"critical": 10, "high": 8, "medium": 6, "low": 4}
 _TIER_ORDER  = ["critical", "high", "medium", "low"]
 
-_MAP_CENTER = [38.12, -121.73]
-_MAP_ZOOM   = 8
+# District display names (CalTRANS districts present in the data)
+_DISTRICT_NAMES = {
+    0:  "All California",
+    3:  "D3 — Sacramento Valley",
+    4:  "D4 — Bay Area",
+    5:  "D5 — Central Coast",
+    6:  "D6 — Fresno / San Joaquin",
+    7:  "D7 — Los Angeles",
+    8:  "D8 — San Bernardino / Riverside",
+    10: "D10 — Stockton / Modesto",
+    11: "D11 — San Diego",
+}
+
+# Map center and zoom per district (lat, lng, zoom)
+_DISTRICT_MAP = {
+    0:  ([36.5,  -119.5], 6),   # All CA
+    3:  ([38.12, -121.73], 8),  # Sacramento Valley
+    4:  ([37.36, -122.00], 9),  # Bay Area
+    5:  ([36.56, -120.52], 8),  # Central Coast
+    6:  ([35.65, -119.09], 8),  # Fresno / San Joaquin
+    7:  ([33.98, -117.99], 9),  # Los Angeles
+    8:  ([33.48, -116.88], 8),  # San Bernardino / Riverside
+    10: ([37.98, -120.37], 9),  # Stockton / Modesto
+    11: ([32.76, -117.01], 10), # San Diego
+}
 
 _AVAILABLE_DATES = sorted(
     p.stem.replace("CA_backtest_", "")
@@ -87,12 +110,21 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     st.title("Backtest Replay")
-    st.caption("Sacramento / Bay Area corridor — January 2026")
+    st.caption("California — January 2026")
     st.divider()
 
     if not _AVAILABLE_DATES:
-        st.error("No backtest files found in data/analyzed/")
+        st.error("No backtest files found in data/")
         st.stop()
+
+    district_id = st.selectbox(
+        "District",
+        options=list(_DISTRICT_NAMES.keys()),
+        index=0,
+        format_func=lambda d: _DISTRICT_NAMES[d],
+    )
+
+    st.divider()
 
     selected_date_str = st.selectbox(
         "Select date (January 2026)",
@@ -158,14 +190,14 @@ def load_all_days() -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def compute_zone_reliability(all_days: pd.DataFrame) -> pd.DataFrame:
+def compute_zone_reliability(all_days: pd.DataFrame, dist_id: int) -> pd.DataFrame:
     """
     For each zone that appeared in critical/high/medium at least once:
     count how many distinct days (out of 31) had a real crash there.
     """
     n_days = len(_AVAILABLE_DATES)
-    sub = all_days[all_days["risk_tier"].isin(["critical", "high", "medium"])]
-    # per zone × date: was there any crash?
+    filtered = all_days if dist_id == 0 else all_days[all_days["district_id"] == float(dist_id)]
+    sub = filtered[filtered["risk_tier"].isin(["critical", "high", "medium"])]
     daily = (
         sub.groupby(["hotspot_id", "primary_road", "date"])["crash_occurred"]
         .max()
@@ -185,6 +217,10 @@ df_all = load_day(selected_date_str)
 if df_all.empty:
     st.error(f"No data for {selected_date_str}.")
     st.stop()
+
+# Apply district filter
+if district_id != 0:
+    df_all = df_all[df_all["district_id"] == float(district_id)].copy()
 
 df = df_all[
     (df_all["slot_hour"] >= hour_filter[0]) &
@@ -223,12 +259,13 @@ global_rate = df["crash_occurred"].mean()
 # Thin header bar — date + context only, no numbers (numbers are in right panel)
 # ──────────────────────────────────────────────────────────────────────────────
 
+district_label = _DISTRICT_NAMES.get(district_id, "California")
 st.markdown(
     f"<div style='line-height:1.3;padding:2px 0 4px'>"
     f"<span style='font-size:1.15rem;font-weight:700'>{selected_date_str}</span>"
     f"&nbsp;&nbsp;<span style='color:#888;font-size:0.9rem'>{dow}</span>"
     f"&nbsp;&nbsp;·&nbsp;&nbsp;"
-    f"<span style='color:#888;font-size:0.85rem'>Sacramento / Bay Area</span>"
+    f"<span style='color:#888;font-size:0.85rem'>{district_label}</span>"
     f"&nbsp;&nbsp;·&nbsp;&nbsp;"
     f"<span style='color:#888;font-size:0.85rem'>{hour_label}</span>"
     f"&nbsp;&nbsp;·&nbsp;&nbsp;"
@@ -247,8 +284,9 @@ st.divider()
 # ──────────────────────────────────────────────────────────────────────────────
 
 @st.cache_data(show_spinner=False)
-def _build_map_html(zone_rows: tuple, is_reality: bool) -> str:
-    m = folium.Map(location=_MAP_CENTER, zoom_start=_MAP_ZOOM, tiles="CartoDB positron")
+def _build_map_html(zone_rows: tuple, is_reality: bool, dist_id: int) -> str:
+    center, zoom = _DISTRICT_MAP.get(dist_id, _DISTRICT_MAP[0])
+    m = folium.Map(location=center, zoom_start=zoom, tiles="CartoDB positron")
 
     for row in zone_rows:
         tier      = row["worst_tier"]
@@ -330,13 +368,13 @@ def _build_map_html(zone_rows: tuple, is_reality: bool) -> str:
 
 _zone_rows  = tuple(zone_summary.to_dict(orient="records"))
 _is_reality = (view_mode == "Reality check")
-map_html    = _build_map_html(_zone_rows, _is_reality)
+map_html    = _build_map_html(_zone_rows, _is_reality, district_id)
 
 # Pre-compute stats shared across panels
 
 # Cross-day reliability: zones most consistently hit across all 31 days
 _all_days    = load_all_days()
-_reliability = compute_zone_reliability(_all_days)
+_reliability = compute_zone_reliability(_all_days, district_id)
 
 # Today's crash status per zone (max over all hours of the day)
 today_crash = (
