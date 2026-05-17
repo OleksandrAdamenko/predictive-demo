@@ -31,15 +31,15 @@ _TIER_ORDER  = ["critical", "high", "medium", "low"]
 # District display names — all 12 CalTRANS districts with zone counts
 _DISTRICT_NAMES = {
     0:  "All California",
-    1:  "D1 — North Coast (30 zones)",
-    2:  "D2 — Shasta / Lassen (6 zones)",
+    1:  "D1 — North Coast",
+    2:  "D2 — Shasta / Lassen",
     3:  "D3 — Sacramento Valley",
     4:  "D4 — Bay Area",
     5:  "D5 — Central Coast",
     6:  "D6 — Fresno / San Joaquin",
     7:  "D7 — Los Angeles",
     8:  "D8 — San Bernardino / Riverside",
-    9:  "D9 — Eastern Sierra (6 zones)",
+    9:  "D9 — Eastern Sierra",
     10: "D10 — Stockton / Modesto",
     11: "D11 — San Diego",
     12: "D12 — Orange County",
@@ -165,8 +165,7 @@ with st.sidebar:
 
     st.divider()
     st.caption(
-        "Data: CA crashes 2023–2025 (train) + Jan 2026 (holdout).  \n"
-        "Model: GradientBoosting · H3 res-8 · Open-Meteo weather."
+        "Data: CA crashes 2023–2025 (train) + Jan 2026 (holdout)."
     )
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -266,11 +265,22 @@ zone_summary = (
 n_pos       = int(df["crash_occurred"].sum())
 n_slots     = len(df)
 total_zones = df["hotspot_id"].nunique()
-tier_counts = df.groupby("risk_tier")["crash_occurred"].agg(n_slots="count", n_crashes="sum")
 dow         = _weekday_label(selected_date_str)
 hour_label  = ("All hours" if hour_filter == (0, 23)
                else f"{hour_filter[0]:02d}:00 – {hour_filter[1]:02d}:00")
-global_rate = df["crash_occurred"].mean()
+
+# Zone-level stats: same unit as map (one zone = one point, worst tier wins)
+# A zone "has crash" if any slot in the selected hour window had crash_occurred=1
+zone_stats = (
+    df[df["risk_tier"] != "low"]
+    .groupby("hotspot_id")
+    .agg(
+        worst_tier    =("risk_tier",      lambda s: _worst_tier(s)),
+        any_crash     =("crash_occurred", "max"),
+    )
+    .reset_index()
+)
+global_rate = zone_stats["any_crash"].mean() if len(zone_stats) > 0 else 0.045
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Thin header bar — date + context only, no numbers (numbers are in right panel)
@@ -458,8 +468,6 @@ hourly = (
                      "avg_score":  "Avg predicted score"})
 )
 
-total_crashes = df["crash_occurred"].sum()
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Layout
 #
@@ -514,9 +522,9 @@ with map_col:
             f"{n_slots:,} zone-hour slots",
         )
         for tier in ["critical", "high", "medium"]:
-            tc   = tier_counts.loc[tier] if tier in tier_counts.index else None
-            n    = int(tc["n_slots"])   if tc is not None else 0
-            c    = int(tc["n_crashes"]) if tc is not None else 0
+            tier_zones = zone_stats[zone_stats["worst_tier"] == tier]
+            n    = len(tier_zones)
+            c    = int(tier_zones["any_crash"].sum())
             prec = c / n if n > 0 else 0.0
             lift = prec / global_rate if global_rate > 0 else 0.0
             html_chips += _chip(
@@ -597,15 +605,15 @@ with tbl_left:
     )
     prec_rows = []
     for tier in ["critical", "high", "medium"]:
-        sub  = df[df["risk_tier"] == tier]
-        n    = len(sub)
-        c    = int(sub["crash_occurred"].sum())
+        tier_zones = zone_stats[zone_stats["worst_tier"] == tier]
+        n    = len(tier_zones)
+        c    = int(tier_zones["any_crash"].sum())
         prec = c / n if n > 0 else 0.0
         lift = prec / global_rate if global_rate > 0 else 0.0
         prec_rows.append({
             "Tier":                 tier.capitalize(),
             "Predicted zones":      n,
-            "Actual crashes":       c,
+            "Zones with crash":     c,
             "Precision (hit rate)": f"{prec*100:.1f}%",
             "Lift vs. baseline":    f"{lift:.1f}×",
         })
@@ -616,16 +624,21 @@ with tbl_right:
         '<div class="section-label">Crash capture — share of real crashes caught per tier</div>',
         unsafe_allow_html=True,
     )
+    # Total zones with crash (across all tiers, for denominator)
+    total_crash_zones = int(zone_stats["any_crash"].sum()) + int(
+        (df[df["risk_tier"] == "low"].groupby("hotspot_id")["crash_occurred"].max() == 1).sum()
+    )
     cap_rows, cumul = [], 0
     for tier in ["critical", "high", "medium"]:
-        sub    = df[df["risk_tier"] == tier]
-        c      = int(sub["crash_occurred"].sum())
+        tier_zones = zone_stats[zone_stats["worst_tier"] == tier]
+        c      = int(tier_zones["any_crash"].sum())
         cumul += c
-        pct     = c     / total_crashes * 100 if total_crashes > 0 else 0
-        cum_pct = cumul / total_crashes * 100 if total_crashes > 0 else 0
+        denom   = total_crash_zones if total_crash_zones > 0 else 1
+        pct     = c     / denom * 100
+        cum_pct = cumul / denom * 100
         cap_rows.append({
             "Tier":                  tier.capitalize(),
-            "Crashes in tier":       c,
+            "Zones with crash":      c,
             "% of day's crashes":    f"{pct:.1f}%",
             "Cumulative (top→down)": f"{cum_pct:.1f}%",
         })
