@@ -473,3 +473,100 @@ The key question: when the system flags a zone as dangerous, how much more often
 2. **36% capture with 20% of resources** — by monitoring critical, high, and medium zones (top 20% of all zones), the system covers more than a third of all real crashes. That is 1.8 times more efficient than random patrolling.
 
 3. **One-day-ahead forecast** — the system generates its prediction in advance, using only publicly available weather data and historical crash rates. No special sensors or expensive data sources are required.
+
+---
+---
+
+## Направления развития системы / Development Roadmap
+
+---
+
+### РУССКИЙ
+
+---
+
+### Два уровня точности системы
+
+Анализ январских данных выявил важное разделение в работе модели:
+
+- **Precision (угадывание)** — из зон, которые модель пометила как рискованные, ~10–20% реально имели аварию. Звучит скромно, но это 2–4× лучше случайного выбора (базовый рейт — 4.5%).
+- **Recall (охват)** — из всех зон, где авария произошла, модель накрывает ~36% (при мониторинге топ 20% зон).
+
+Иными словами: система хорошо находит опасные зоны, но при этом помечает слишком много «холостых». Главная задача дальнейшего развития — сократить холостые выстрелы без потери охвата.
+
+Показательный факт из анализа hit-зон: **базовый рейт аварий у топ-зон по попаданиям (~4.5–5.7%) практически не отличается от среднего по всей выборке**. Это означает, что модель находит в этих зонах реальный временной сигнал — она предсказывает не просто «опасное место», а «опасный момент в конкретном месте». Именно это нужно усиливать.
+
+---
+
+### Три направления улучшения
+
+#### 1. Обогащение данными
+
+Добавить новые входные факторы, которые несут реальный временной сигнал:
+- Дорожные работы и временные ограничения скорости
+- Крупные события вблизи дороги (матчи, концерты, ярмарки)
+- Интенсивность трафика (данные Caltrans PeMS или HERE)
+- Аварии в соседних зонах в тот же день («эффект цепочки»)
+
+Каждый новый значимый сигнал напрямую снижает число холостых срабатываний.
+
+#### 2. Увеличение числа per-zone моделей
+
+Сейчас индивидуальные модели обучены только для 50 зон с ≥200 позитивными слотами. Порог завышен: зона с 50–100 примерами уже достаточна для логистической регрессии или дерева решений. Цель — покрыть top-500 зон по активности индивидуальными моделями. Глобальная модель усредняет поведение всей Калифорнии; per-zone модель знает специфику конкретного участка трассы.
+
+#### 3. Двухуровневая архитектура с кросс-валидацией
+
+Наиболее перспективное направление. Схема:
+
+- **Уровень 1** — текущая глобальная модель выдаёт score для каждой зоны
+- **Уровень 2** — мета-модель, обученная на исторических hit-зонах, корректирует score вверх или вниз
+
+Мета-модель использует как фичи: `historical_hit_rate` (доля дней, когда зона была в тире и авария произошла), `historical_precision` (precision модели по этой зоне за прошлые периоды), `days_in_tier` (как часто зона вообще попадает в топ). Это «реверсивное» дообучение на верифицированных сигналах.
+
+**Важно:** мета-модель обучается через кросс-валидацию по времени (train на 2023–2024, val на 2025), чтобы не переобучиться на тех же примерах, которые использовала первая модель.
+
+---
+
+### ENGLISH
+
+---
+
+### Two layers of system accuracy
+
+Analysis of the January data reveals an important distinction in how the model works:
+
+- **Precision (guessing)** — of all zones the model flags as risky, ~10–20% actually had a crash. That sounds modest, but it is 2–4× better than random selection (baseline rate: 4.5%).
+- **Recall (coverage)** — of all zones where a crash actually occurred, the model captures ~36% (when monitoring the top 20% of zones).
+
+In other words: the system is good at finding dangerous zones, but it flags too many false positives. The main goal of further development is to reduce those false positives without losing coverage.
+
+A key insight from the hit-zone analysis: **the baseline crash rate of the top hit-zones (~4.5–5.7%) is nearly identical to the overall average**. This means the model is not simply finding "structurally dangerous" locations — it is detecting a genuine temporal signal: the right moment in a specific place. That is what needs to be amplified.
+
+---
+
+### Three development directions
+
+#### 1. Feature enrichment
+
+Add new input signals that carry real temporal information:
+- Road works and temporary speed restrictions
+- Major events near the road (games, concerts, fairs)
+- Traffic volume data (Caltrans PeMS or HERE)
+- Crashes in neighboring zones on the same day ("chain effect")
+
+Each meaningful new signal directly reduces false positives.
+
+#### 2. Expanding per-zone models
+
+Currently, individual models are trained for only 50 zones with ≥200 positive slots. That threshold is too high: a zone with 50–100 examples already provides enough data for logistic regression or a decision tree. The goal is to cover the top 500 most active zones with individual models. The global model averages behavior across all of California; a per-zone model knows the specifics of a particular road segment.
+
+#### 3. Two-level architecture with cross-validation
+
+The most promising direction. The design:
+
+- **Level 1** — the current global model produces a score for each zone
+- **Level 2** — a meta-model trained on historical hit-zones adjusts that score up or down
+
+The meta-model uses as features: `historical_hit_rate` (share of days the zone was in tier and a crash occurred), `historical_precision` (model precision for this zone over past periods), `days_in_tier` (how often the zone appears in the top tiers at all). This is a form of reverse fine-tuning on verified signals.
+
+**Critically:** the meta-model is trained via time-based cross-validation (train on 2023–2024, validate on 2025) to prevent it from overfitting to the same examples used by the first-level model.
