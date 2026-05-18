@@ -191,7 +191,7 @@ with st.sidebar:
 
     hour_filter = st.slider(
         "Filter by hour of day",
-        min_value=0, max_value=23, value=(0, 23), step=1,
+        min_value=0, max_value=24, value=(0, 24), step=1,
         format="%d:00",
     )
 
@@ -272,7 +272,7 @@ if district_id != 0:
 
 df = df_all[
     (df_all["slot_hour"] >= hour_filter[0]) &
-    (df_all["slot_hour"] <= hour_filter[1])
+    (df_all["slot_hour"] < hour_filter[1])
 ].copy()
 
 df_map = df[df["risk_tier"] != "low"]
@@ -298,7 +298,7 @@ n_pos       = int(df["crash_occurred"].sum())
 n_slots     = len(df)
 total_zones = df["hotspot_id"].nunique()
 dow         = _weekday_label(selected_date_str)
-hour_label  = ("All hours" if hour_filter == (0, 23)
+hour_label  = ("All hours" if hour_filter == (0, 24)
                else f"{hour_filter[0]:02d}:00 – {hour_filter[1]:02d}:00")
 
 # Zone-level stats: same unit as map (one zone = one point, worst tier wins)
