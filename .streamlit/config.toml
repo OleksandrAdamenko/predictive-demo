@@ -1,0 +1,8 @@
+[client]
+toolbarMode = "minimal"
+
+[ui]
+hideSidebarNavigation = false
+
+[theme]
+base = "dark"

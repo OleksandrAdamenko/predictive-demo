@@ -102,7 +102,39 @@ st.markdown("""
     hr { margin: 0.35rem 0 !important; }
     .section-label { font-size:0.8rem; font-weight:600; color:#ccc;
                      text-transform:uppercase; letter-spacing:.05em; margin-bottom:2px; }
+    /* Lock sidebar open — hide collapse/expand button entirely */
+    [data-testid="collapsedControl"] { display: none !important; }
+    [data-testid="stSidebarCollapseButton"] { display: none !important; }
+    /* Force sidebar always visible regardless of collapsed state */
+    section[data-testid="stSidebar"] {
+        min-width: 240px !important;
+        width: 240px !important;
+        transform: none !important;
+        visibility: visible !important;
+    }
+    /* Hide the collapsed arrow that appears when sidebar is closed */
+    [data-testid="collapsedControl"] { display: none !important; }
 </style>
+<script>
+// Force sidebar open on load — clear Streamlit's collapsed state from sessionStorage
+(function() {
+    try {
+        // Streamlit stores sidebar state in sessionStorage
+        Object.keys(sessionStorage).forEach(function(k) {
+            if (k.indexOf('sidebar') !== -1 || k.indexOf('Sidebar') !== -1) {
+                sessionStorage.removeItem(k);
+            }
+        });
+    } catch(e) {}
+    // Also click the expand button if sidebar starts collapsed
+    function openSidebar() {
+        var btn = document.querySelector('[data-testid="collapsedControl"]');
+        if (btn) { btn.click(); }
+    }
+    setTimeout(openSidebar, 300);
+    setTimeout(openSidebar, 800);
+})();
+</script>
 """, unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
